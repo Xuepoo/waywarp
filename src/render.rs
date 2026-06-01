@@ -3,13 +3,16 @@
 use crate::config::Config;
 use crate::hint::HintGrid;
 
+use std::cell::RefCell;
 use std::os::fd::AsRawFd;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 use tracing::{error, info};
 
 use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop,
-    protocol::{wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface},
+    protocol::{
+        wl_buffer, wl_compositor, wl_output, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+    },
 };
 
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
@@ -27,6 +30,16 @@ pub struct AppState {
     // Geometry
     pub width: i32,
     pub height: i32,
+
+    // Keyboard input state
+    pub seat: Option<wayland_client::protocol::wl_seat::WlSeat>,
+    pub keyboard: Option<wayland_client::protocol::wl_keyboard::WlKeyboard>,
+    pub xkb_context: Option<xkbcommon::xkb::Context>,
+    pub xkb_keymap: Option<xkbcommon::xkb::Keymap>,
+    pub xkb_state: Option<xkbcommon::xkb::State>,
+    pub input_buf: String,
+    pub selection_made: bool,
+    pub canceled: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -40,7 +53,7 @@ pub struct OutputInfo {
 }
 
 impl AppState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             running: true,
             configured: false,
@@ -51,6 +64,16 @@ impl AppState {
             layer_surfaces: Vec::new(),
             width: 0,
             height: 0,
+            seat: None,
+            keyboard: None,
+            xkb_context: Some(xkbcommon::xkb::Context::new(
+                xkbcommon::xkb::CONTEXT_NO_FLAGS,
+            )),
+            xkb_keymap: None,
+            xkb_state: None,
+            input_buf: String::new(),
+            selection_made: false,
+            canceled: false,
         }
     }
 }
@@ -99,6 +122,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
                 "wl_output" => {
                     let output = registry.bind::<wl_output::WlOutput, _, _>(name, 4, qhandle, ());
                     state.outputs.push((output, None));
+                }
+                "wl_seat" => {
+                    state.seat = Some(registry.bind::<wl_seat::WlSeat, _, _>(name, 4, qhandle, ()));
                 }
                 _ => {}
             }
@@ -225,7 +251,7 @@ delegate_noop!(AppState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 
 pub struct Renderer {
     conn: Connection,
-    state: Arc<Mutex<AppState>>,
+    state: Rc<RefCell<AppState>>,
 }
 
 impl Renderer {
@@ -236,7 +262,7 @@ impl Renderer {
             anyhow::anyhow!("Wayland connection failed")
         })?;
 
-        let state = Arc::new(Mutex::new(AppState::new()));
+        let state = Rc::new(RefCell::new(AppState::new()));
 
         Ok(Self { conn, state })
     }
@@ -309,11 +335,11 @@ impl Renderer {
         let _registry = self.conn.display().get_registry(&qhandle, ());
 
         info!("Retrieving active registry globals...");
-        event_queue.roundtrip(&mut *self.state.lock().unwrap())?;
-        event_queue.roundtrip(&mut *self.state.lock().unwrap())?; // Run twice to flush output specs
+        event_queue.roundtrip(&mut *self.state.borrow_mut())?;
+        event_queue.roundtrip(&mut *self.state.borrow_mut())?; // Run twice to flush output specs
 
         let (compositor, shm, layer_shell, output_info) = {
-            let s = self.state.lock().unwrap();
+            let s = self.state.borrow();
             let out = s
                 .outputs
                 .iter()
@@ -373,10 +399,10 @@ impl Renderer {
         wl_surface.commit();
 
         // Roundtrip to wait for configure event to establish bounds
-        event_queue.roundtrip(&mut *self.state.lock().unwrap())?;
+        event_queue.roundtrip(&mut *self.state.borrow_mut())?;
 
         let (width, height) = {
-            let s = self.state.lock().unwrap();
+            let s = self.state.borrow();
             (s.width, s.height)
         };
 
@@ -402,102 +428,206 @@ impl Renderer {
 
         let cr = cairo::Context::new(&cairo_surface)?;
 
-        // 1. Draw solid overlay layout with soft transparent background
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.2); // Very soft dark tint across background
-        cr.set_operator(cairo::Operator::Source);
-        cr.paint()?;
+        // Helper function to repaint background and filtered labels
+        let draw_grid = |grid: &HintGrid, prefix: &str| -> anyhow::Result<()> {
+            // 1. Solid overlay layout with soft transparent background
+            cr.set_source_rgba(0.0, 0.0, 0.0, 0.2);
+            cr.set_operator(cairo::Operator::Source);
+            cr.paint()?;
 
-        // 2. Draw mock demo hint labels to verify Pango rendering is functional
-        let mock_hints = vec![
-            ("aa", width / 3, height / 2),
-            ("bb", (width * 2) / 3, height / 2),
-        ];
+            // 2. Render filtered labels
+            for hint in &grid.hints {
+                if !hint.label.starts_with(prefix) {
+                    continue;
+                }
 
-        for (label, x, y) in mock_hints {
-            let label_w = 40.0;
-            let label_h = 30.0;
+                let label_w = hint.width as f64;
+                let label_h = hint.height as f64;
+                let x = hint.x as f64;
+                let y = hint.y as f64;
 
-            // Draw rounded rect background
-            cr.set_operator(cairo::Operator::Over);
-            cr.set_source_rgba(
-                config.hint_bg[0],
-                config.hint_bg[1],
-                config.hint_bg[2],
-                config.hint_bg[3],
-            );
+                cr.set_operator(cairo::Operator::Over);
+                cr.set_source_rgba(
+                    config.hint_bg[0],
+                    config.hint_bg[1],
+                    config.hint_bg[2],
+                    config.hint_bg[3],
+                );
 
-            // Render smooth path
-            let r = config.hint_border_radius;
-            cr.new_sub_path();
-            cr.arc(
-                x as f64 - label_w / 2.0 + r,
-                y as f64 - label_h / 2.0 + r,
-                r,
-                180.0 * std::f64::consts::PI / 180.0,
-                270.0 * std::f64::consts::PI / 180.0,
-            );
-            cr.arc(
-                x as f64 + label_w / 2.0 - r,
-                y as f64 - label_h / 2.0 + r,
-                r,
-                270.0 * std::f64::consts::PI / 180.0,
-                360.0 * std::f64::consts::PI / 180.0,
-            );
-            cr.arc(
-                x as f64 + label_w / 2.0 - r,
-                y as f64 + label_h / 2.0 - r,
-                r,
-                0.0 * std::f64::consts::PI / 180.0,
-                90.0 * std::f64::consts::PI / 180.0,
-            );
-            cr.arc(
-                x as f64 - label_w / 2.0 + r,
-                y as f64 + label_h / 2.0 - r,
-                r,
-                90.0 * std::f64::consts::PI / 180.0,
-                180.0 * std::f64::consts::PI / 180.0,
-            );
-            cr.close_path();
-            cr.fill()?;
+                let r = config.hint_border_radius;
+                cr.new_sub_path();
+                cr.arc(
+                    x - label_w / 2.0 + r,
+                    y - label_h / 2.0 + r,
+                    r,
+                    180.0 * std::f64::consts::PI / 180.0,
+                    270.0 * std::f64::consts::PI / 180.0,
+                );
+                cr.arc(
+                    x + label_w / 2.0 - r,
+                    y - label_h / 2.0 + r,
+                    r,
+                    270.0 * std::f64::consts::PI / 180.0,
+                    360.0 * std::f64::consts::PI / 180.0,
+                );
+                cr.arc(
+                    x + label_w / 2.0 - r,
+                    y + label_h / 2.0 - r,
+                    r,
+                    0.0 * std::f64::consts::PI / 180.0,
+                    90.0 * std::f64::consts::PI / 180.0,
+                );
+                cr.arc(
+                    x - label_w / 2.0 + r,
+                    y + label_h / 2.0 - r,
+                    r,
+                    90.0 * std::f64::consts::PI / 180.0,
+                    180.0 * std::f64::consts::PI / 180.0,
+                );
+                cr.close_path();
+                cr.fill()?;
 
-            // Render font layout text
-            cr.set_source_rgba(
-                config.hint_fg[0],
-                config.hint_fg[1],
-                config.hint_fg[2],
-                config.hint_fg[3],
-            );
+                cr.set_source_rgba(
+                    config.hint_fg[0],
+                    config.hint_fg[1],
+                    config.hint_fg[2],
+                    config.hint_fg[3],
+                );
 
-            cr.select_font_face(
-                &config.hint_font,
-                cairo::FontSlant::Normal,
-                cairo::FontWeight::Normal,
-            );
-            cr.set_font_size(config.hint_size as f64);
+                cr.select_font_face(
+                    &config.hint_font,
+                    cairo::FontSlant::Normal,
+                    cairo::FontWeight::Normal,
+                );
+                cr.set_font_size(config.hint_size as f64);
 
-            let extents = cr.text_extents(label)?;
-            cr.move_to(
-                x as f64 - extents.width() / 2.0 - extents.x_bearing(),
-                y as f64 - extents.height() / 2.0 - extents.y_bearing(),
-            );
-            cr.show_text(label)?;
-        }
+                let extents = cr.text_extents(&hint.label)?;
+                cr.move_to(
+                    x - extents.width() / 2.0 - extents.x_bearing(),
+                    y - extents.height() / 2.0 - extents.y_bearing(),
+                );
+                cr.show_text(&hint.label)?;
+            }
 
-        cairo_surface.flush();
+            cairo_surface.flush();
+            Ok(())
+        };
+
+        // Initialize active HintGrid
+        let mut active_grid =
+            HintGrid::generate_first_pass(width, height, &config.hint_chars, 0, false, None);
+
+        // Perform initial draw
+        draw_grid(&active_grid, "")?;
 
         // Attach populated buffer and commit surface
         wl_surface.attach(Some(&buffer), 0, 0);
         wl_surface.damage(0, 0, width, height);
         wl_surface.commit();
 
-        info!("Renders committed successfully to the Compositor.");
+        info!("Initial frame committed. Awaiting Wayland seat keyboard events...");
 
-        // Loop momentarily for rendering presentation (interactive testing)
-        let mut loop_count = 0;
-        while self.state.lock().unwrap().running && loop_count < 100 {
-            event_queue.roundtrip(&mut *self.state.lock().unwrap())?;
-            std::thread::sleep(std::time::Duration::from_millis(30));
-            loop_count += 1;
+        let mut current_prefix = String::new();
+        let mut refinement_level = 1;
+
+        // Loop dynamically processing inputs
+        while self.state.borrow().running {
+            event_queue.roundtrip(&mut *self.state.borrow_mut())?;
+
+            let (prefix, selection_made, canceled) = {
+                let s = self.state.borrow();
+                (s.input_buf.clone(), s.selection_made, s.canceled)
+            };
+
+            if canceled {
+                break;
+            }
+
+            // Forced select confirm via Enter/Return
+            if selection_made {
+                let matched = active_grid
+                    .hints
+                    .iter()
+                    .find(|h| h.label == prefix || h.label.starts_with(&prefix));
+                if let Some(h) = matched {
+                    info!(
+                        "Selection forced confirm: label='{}' at ({}, {})",
+                        h.label, h.x, h.y
+                    );
+                }
+                break;
+            }
+
+            // Redraw filtered layout upon prefix buffer mutation
+            if prefix != current_prefix {
+                current_prefix = prefix.clone();
+                info!("Input buffer mutated: {:?}", current_prefix);
+
+                let matches: Vec<&crate::hint::Hint> = active_grid
+                    .hints
+                    .iter()
+                    .filter(|h| h.label.starts_with(&current_prefix))
+                    .collect();
+
+                if matches.is_empty() {
+                    // Reset input prefix on mismatch
+                    self.state.borrow_mut().input_buf.clear();
+                    current_prefix.clear();
+                    draw_grid(&active_grid, "")?;
+                } else if matches.len() == 1 {
+                    // Match resolved!
+                    let matched_hint = matches[0].clone();
+
+                    if refinement_level < config.refinement_passes {
+                        // Subdivision refinement zoom
+                        info!(
+                            "Triggering refinement pass {} for label='{}'",
+                            refinement_level + 1,
+                            matched_hint.label
+                        );
+                        refinement_level += 1;
+
+                        self.state.borrow_mut().input_buf.clear();
+                        current_prefix.clear();
+
+                        // Derive subdivision boundaries
+                        let unique_len =
+                            HintGrid::get_unique_chars(&config.hint_chars).len() as i32;
+                        let cell_w = width / unique_len;
+                        let cell_h = height / unique_len;
+                        let x_min = matched_hint.x - cell_w / 2;
+                        let y_min = matched_hint.y - cell_h / 2;
+                        let x_max = matched_hint.x + cell_w / 2;
+                        let y_max = matched_hint.y + cell_h / 2;
+
+                        active_grid = HintGrid::generate_refinement(
+                            x_min,
+                            y_min,
+                            x_max,
+                            y_max,
+                            &config.hint_chars,
+                            0,
+                        );
+                        draw_grid(&active_grid, "")?;
+                    } else {
+                        // Select resolved
+                        info!(
+                            "Warp target successfully resolved: ({}, {})",
+                            matched_hint.x, matched_hint.y
+                        );
+                        self.state.borrow_mut().running = false;
+                    }
+                } else {
+                    // Dynamic filtering
+                    draw_grid(&active_grid, &current_prefix)?;
+                }
+
+                wl_surface.attach(Some(&buffer), 0, 0);
+                wl_surface.damage(0, 0, width, height);
+                wl_surface.commit();
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(16)); // Throttle loops to roughly ~60hz
         }
 
         // Clean up resources
