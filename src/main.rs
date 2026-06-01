@@ -80,9 +80,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Default: interactive hint mode
-    // TODO: Implement interactive hint overlay
-    eprintln!("Interactive hint mode not yet implemented");
-    eprintln!("Use --help to see available options");
+    let config = config::Config::load();
+    let grid = hint::HintGrid::new();
+    let mut renderer = render::Renderer::new()?;
+    renderer.draw_overlay(&grid, &config)?;
 
     Ok(())
 }
