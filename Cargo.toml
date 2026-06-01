@@ -23,7 +23,7 @@ pango = "0.19"
 pangocairo = "0.19"
 
 # Input
-xkbcommon = "0.7"
+xkbcommon = "0.9"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
