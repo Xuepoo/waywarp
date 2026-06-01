@@ -260,6 +260,20 @@ delegate_noop!(AppState: ignore zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 // Renderer Implementation
 // -----------------------------------------------------------------------------
 
+struct OverlayInstance {
+    output: wl_output::WlOutput,
+    info: OutputInfo,
+    wl_surface: wl_surface::WlSurface,
+    layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    buffer: wl_buffer::WlBuffer,
+    ptr: *mut u8,
+    size: usize,
+    cairo_surface: cairo::ImageSurface,
+    cairo_context: cairo::Context,
+    screen_index: u32,
+    monitor_char: char,
+}
+
 pub struct Renderer {
     conn: Connection,
     state: Rc<RefCell<AppState>>,
@@ -349,21 +363,49 @@ impl Renderer {
         event_queue.roundtrip(&mut *self.state.borrow_mut())?;
         event_queue.roundtrip(&mut *self.state.borrow_mut())?; // Run twice to flush output specs
 
-        let (compositor, shm, layer_shell, output_info) = {
+        // Filter and collect all fully resolved active outputs
+        let active_outputs: Vec<(wl_output::WlOutput, OutputInfo)> = {
             let s = self.state.borrow();
-            let out = s
-                .outputs
+            s.outputs
                 .iter()
-                .filter_map(|(_, info)| info.clone())
-                .next()
-                .unwrap_or(OutputInfo {
+                .filter_map(|(o, info)| info.clone().map(|i| (o.clone(), i)))
+                .filter(|(_, info)| info.width > 0 && info.height > 0)
+                .collect()
+        };
+
+        let active_outputs = if active_outputs.is_empty() {
+            info!("No active outputs resolved from compositor. Falling back to default.");
+            let fallback_output = {
+                let s = self.state.borrow();
+                s.outputs
+                    .first()
+                    .map(|(o, _)| o.clone())
+                    .ok_or_else(|| anyhow::anyhow!("No outputs registered at all"))?
+            };
+            vec![(
+                fallback_output,
+                OutputInfo {
                     name: "default".to_string(),
                     x: 0,
                     y: 0,
                     width: 1920,
                     height: 1080,
                     scale: 1,
-                });
+                },
+            )]
+        } else {
+            active_outputs
+        };
+
+        let is_multi = active_outputs.len() > 1;
+        info!(
+            "Detected active outputs: {}. Multi-monitor mode: {}",
+            active_outputs.len(),
+            is_multi
+        );
+
+        let (compositor, shm, layer_shell) = {
+            let s = self.state.borrow();
             (
                 s.compositor
                     .clone()
@@ -374,174 +416,238 @@ impl Renderer {
                 s.layer_shell
                     .clone()
                     .ok_or_else(|| anyhow::anyhow!("zwlr_layer_shell_v1 missing"))?,
-                out,
             )
         };
 
-        info!(
-            "Spawning Layer Shell Overlay Window on monitor: {:?}",
-            output_info.name
-        );
+        let chars = HintGrid::get_unique_chars(&config.hint_chars);
+        let mut instances = Vec::new();
 
-        let wl_surface = compositor.create_surface(&qhandle, ());
+        for (i, (output, info)) in active_outputs.iter().enumerate() {
+            let screen_index = i as u32;
+            let monitor_char = chars[i % chars.len()];
 
-        // Grab layer surface
-        let layer_surface = layer_shell.get_layer_surface(
-            &wl_surface,
-            None,
-            zwlr_layer_shell_v1::Layer::Overlay,
-            "waywarp".to_string(),
-            &qhandle,
-            (),
-        );
+            info!(
+                "Spawning Layer Shell Overlay Window on monitor: {:?} ({:?}) with index {} char '{}'",
+                info.name, output, screen_index, monitor_char
+            );
 
-        // Standard setup: fullscreen, anchor to all edges
-        layer_surface.set_size(output_info.width as u32, output_info.height as u32);
-        layer_surface.set_anchor(
-            zwlr_layer_surface_v1::Anchor::Top
-                | zwlr_layer_surface_v1::Anchor::Bottom
-                | zwlr_layer_surface_v1::Anchor::Left
-                | zwlr_layer_surface_v1::Anchor::Right,
-        );
-        layer_surface
-            .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
-        layer_surface.set_exclusive_zone(-1); // Transparent click through allowed
+            let wl_surface = compositor.create_surface(&qhandle, ());
+            let layer_surface = layer_shell.get_layer_surface(
+                &wl_surface,
+                Some(output), // Bind explicitly to this monitor
+                zwlr_layer_shell_v1::Layer::Overlay,
+                "waywarp".to_string(),
+                &qhandle,
+                (),
+            );
 
-        wl_surface.commit();
+            // Anchors matching edges
+            layer_surface.set_size(info.width as u32, info.height as u32);
+            layer_surface.set_anchor(
+                zwlr_layer_surface_v1::Anchor::Top
+                    | zwlr_layer_surface_v1::Anchor::Bottom
+                    | zwlr_layer_surface_v1::Anchor::Left
+                    | zwlr_layer_surface_v1::Anchor::Right,
+            );
 
-        // Roundtrip to wait for configure event to establish bounds
-        event_queue.roundtrip(&mut *self.state.borrow_mut())?;
+            // Keyboard grab exclusively on the primary monitor overlay
+            if i == 0 {
+                layer_surface.set_keyboard_interactivity(
+                    zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive,
+                );
+            } else {
+                layer_surface
+                    .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+            }
+            layer_surface.set_exclusive_zone(-1); // Transparent click through allowed
 
-        let (width, height) = {
-            let s = self.state.borrow();
-            (s.width, s.height)
-        };
+            wl_surface.commit();
 
-        if width <= 0 || height <= 0 {
-            return Err(anyhow::anyhow!("Invalid Layer surface configured bounds"));
+            // Setup SHM buffer matching monitor dimensions
+            let (buffer, ptr, size) =
+                Self::create_shm_buffer(&shm, info.width, info.height, &qhandle)?;
+            let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
+            let cairo_surface = cairo::ImageSurface::create_for_data(
+                slice,
+                cairo::Format::ARgb32,
+                info.width,
+                info.height,
+                info.width * 4,
+            )?;
+            let cairo_context = cairo::Context::new(&cairo_surface)?;
+
+            instances.push(OverlayInstance {
+                output: output.clone(),
+                info: info.clone(),
+                wl_surface,
+                layer_surface,
+                buffer,
+                ptr,
+                size,
+                cairo_surface,
+                cairo_context,
+                screen_index,
+                monitor_char,
+            });
         }
 
-        info!(
-            "Allocating {}x{} pixel SHM buffer context...",
-            width, height
-        );
-        let (buffer, ptr, size) = Self::create_shm_buffer(&shm, width, height, &qhandle)?;
-
-        // Connect Cairo rendering canvas directly onto shared memory region
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
-        let cairo_surface = cairo::ImageSurface::create_for_data(
-            slice,
-            cairo::Format::ARgb32,
-            width,
-            height,
-            width * 4,
-        )?;
-
-        let cr = cairo::Context::new(&cairo_surface)?;
-
-        // Helper function to repaint background and filtered labels
-        let draw_grid = |grid: &HintGrid, prefix: &str| -> anyhow::Result<()> {
-            // 1. Solid overlay layout with soft transparent background
-            cr.set_source_rgba(0.0, 0.0, 0.0, 0.2);
-            cr.set_operator(cairo::Operator::Source);
-            cr.paint()?;
-
-            // 2. Render filtered labels
-            for hint in &grid.hints {
-                if !hint.label.starts_with(prefix) {
-                    continue;
-                }
-
-                let label_w = hint.width as f64;
-                let label_h = hint.height as f64;
-                let x = hint.x as f64;
-                let y = hint.y as f64;
-
-                cr.set_operator(cairo::Operator::Over);
-                cr.set_source_rgba(
-                    config.hint_bg[0],
-                    config.hint_bg[1],
-                    config.hint_bg[2],
-                    config.hint_bg[3],
-                );
-
-                let r = config.hint_border_radius;
-                cr.new_sub_path();
-                cr.arc(
-                    x - label_w / 2.0 + r,
-                    y - label_h / 2.0 + r,
-                    r,
-                    180.0 * std::f64::consts::PI / 180.0,
-                    270.0 * std::f64::consts::PI / 180.0,
-                );
-                cr.arc(
-                    x + label_w / 2.0 - r,
-                    y - label_h / 2.0 + r,
-                    r,
-                    270.0 * std::f64::consts::PI / 180.0,
-                    360.0 * std::f64::consts::PI / 180.0,
-                );
-                cr.arc(
-                    x + label_w / 2.0 - r,
-                    y + label_h / 2.0 - r,
-                    r,
-                    0.0 * std::f64::consts::PI / 180.0,
-                    90.0 * std::f64::consts::PI / 180.0,
-                );
-                cr.arc(
-                    x - label_w / 2.0 + r,
-                    y + label_h / 2.0 - r,
-                    r,
-                    90.0 * std::f64::consts::PI / 180.0,
-                    180.0 * std::f64::consts::PI / 180.0,
-                );
-                cr.close_path();
-                cr.fill()?;
-
-                cr.set_source_rgba(
-                    config.hint_fg[0],
-                    config.hint_fg[1],
-                    config.hint_fg[2],
-                    config.hint_fg[3],
-                );
-
-                cr.select_font_face(
-                    &config.hint_font,
-                    cairo::FontSlant::Normal,
-                    cairo::FontWeight::Normal,
-                );
-                cr.set_font_size(config.hint_size as f64);
-
-                let extents = cr.text_extents(&hint.label)?;
-                cr.move_to(
-                    x - extents.width() / 2.0 - extents.x_bearing(),
-                    y - extents.height() / 2.0 - extents.y_bearing(),
-                );
-                cr.show_text(&hint.label)?;
+        // Registry check
+        {
+            let mut s = self.state.borrow_mut();
+            for inst in &instances {
+                s.layer_surfaces.push(inst.layer_surface.clone());
             }
+        }
 
-            cairo_surface.flush();
+        // Wait for configure roundtrip
+        event_queue.roundtrip(&mut *self.state.borrow_mut())?;
+
+        // Global hint grid initialization
+        let mut active_grid = if is_multi {
+            let mut all_hints = Vec::new();
+            for inst in &instances {
+                let grid = HintGrid::generate_first_pass(
+                    inst.info.width,
+                    inst.info.height,
+                    &config.hint_chars,
+                    inst.screen_index,
+                    true,
+                    Some(inst.monitor_char),
+                );
+                all_hints.extend(grid.hints);
+            }
+            let mut g = HintGrid::new(0, 0, 0);
+            g.hints = all_hints;
+            g
+        } else {
+            let inst = &instances[0];
+            HintGrid::generate_first_pass(
+                inst.info.width,
+                inst.info.height,
+                &config.hint_chars,
+                0,
+                false,
+                None,
+            )
+        };
+
+        // Multi-monitor repaint closure
+        let draw_grid = |instances: &mut [OverlayInstance],
+                         grid: &HintGrid,
+                         prefix: &str|
+         -> anyhow::Result<()> {
+            for inst in instances {
+                let cr = &inst.cairo_context;
+                let info = &inst.info;
+
+                let has_matches = grid
+                    .hints
+                    .iter()
+                    .any(|h| h.screen == inst.screen_index && h.label.starts_with(prefix));
+
+                if !prefix.is_empty() && !has_matches {
+                    // Repaint screen as fully transparent if no matching hints are left
+                    cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+                    cr.set_operator(cairo::Operator::Source);
+                    cr.paint()?;
+                } else {
+                    cr.set_source_rgba(0.0, 0.0, 0.0, 0.2);
+                    cr.set_operator(cairo::Operator::Source);
+                    cr.paint()?;
+
+                    for hint in &grid.hints {
+                        if hint.screen != inst.screen_index {
+                            continue;
+                        }
+                        if !hint.label.starts_with(prefix) {
+                            continue;
+                        }
+
+                        let label_w = hint.width as f64;
+                        let label_h = hint.height as f64;
+                        let x = hint.x as f64;
+                        let y = hint.y as f64;
+
+                        cr.set_operator(cairo::Operator::Over);
+                        cr.set_source_rgba(
+                            config.hint_bg[0],
+                            config.hint_bg[1],
+                            config.hint_bg[2],
+                            config.hint_bg[3],
+                        );
+
+                        let r = config.hint_border_radius;
+                        cr.new_sub_path();
+                        cr.arc(
+                            x - label_w / 2.0 + r,
+                            y - label_h / 2.0 + r,
+                            r,
+                            180.0 * std::f64::consts::PI / 180.0,
+                            270.0 * std::f64::consts::PI / 180.0,
+                        );
+                        cr.arc(
+                            x + label_w / 2.0 - r,
+                            y - label_h / 2.0 + r,
+                            r,
+                            270.0 * std::f64::consts::PI / 180.0,
+                            360.0 * std::f64::consts::PI / 180.0,
+                        );
+                        cr.arc(
+                            x + label_w / 2.0 - r,
+                            y + label_h / 2.0 - r,
+                            r,
+                            0.0 * std::f64::consts::PI / 180.0,
+                            90.0 * std::f64::consts::PI / 180.0,
+                        );
+                        cr.arc(
+                            x - label_w / 2.0 + r,
+                            y + label_h / 2.0 - r,
+                            r,
+                            90.0 * std::f64::consts::PI / 180.0,
+                            180.0 * std::f64::consts::PI / 180.0,
+                        );
+                        cr.close_path();
+                        cr.fill()?;
+
+                        cr.set_source_rgba(
+                            config.hint_fg[0],
+                            config.hint_fg[1],
+                            config.hint_fg[2],
+                            config.hint_fg[3],
+                        );
+
+                        cr.select_font_face(
+                            &config.hint_font,
+                            cairo::FontSlant::Normal,
+                            cairo::FontWeight::Normal,
+                        );
+                        cr.set_font_size(config.hint_size as f64);
+
+                        let extents = cr.text_extents(&hint.label)?;
+                        cr.move_to(
+                            x - extents.width() / 2.0 - extents.x_bearing(),
+                            y - extents.height() / 2.0 - extents.y_bearing(),
+                        );
+                        cr.show_text(&hint.label)?;
+                    }
+                }
+                inst.cairo_surface.flush();
+
+                inst.wl_surface.attach(Some(&inst.buffer), 0, 0);
+                inst.wl_surface.damage(0, 0, info.width, info.height);
+                inst.wl_surface.commit();
+            }
             Ok(())
         };
 
-        // Initialize active HintGrid
-        let mut active_grid =
-            HintGrid::generate_first_pass(width, height, &config.hint_chars, 0, false, None);
+        // Draw initial frame
+        draw_grid(&mut instances, &active_grid, "")?;
 
-        // Perform initial draw
-        draw_grid(&active_grid, "")?;
-
-        // Attach populated buffer and commit surface
-        wl_surface.attach(Some(&buffer), 0, 0);
-        wl_surface.damage(0, 0, width, height);
-        wl_surface.commit();
-
-        info!("Initial frame committed. Awaiting Wayland seat keyboard events...");
+        info!("Initial multi-monitor frames committed. Awaiting Seat keyboard events...");
 
         let mut current_prefix = String::new();
         let mut refinement_level = 1;
 
-        // Loop dynamically processing inputs
         while self.state.borrow().running {
             event_queue.roundtrip(&mut *self.state.borrow_mut())?;
 
@@ -554,7 +660,6 @@ impl Renderer {
                 break;
             }
 
-            // Forced select confirm via Enter/Return
             if selection_made {
                 let matched = active_grid
                     .hints
@@ -562,21 +667,44 @@ impl Renderer {
                     .find(|h| h.label == prefix || h.label.starts_with(&prefix));
                 if let Some(h) = matched {
                     info!(
-                        "Selection forced confirm: label='{}' at ({}, {})",
-                        h.label, h.x, h.y
+                        "Selection forced confirm: label='{}' at ({}, {}) on screen {}",
+                        h.label, h.x, h.y, h.screen
                     );
+
+                    let (target_output, target_info) = active_outputs
+                        .iter()
+                        .enumerate()
+                        .find(|(idx, _)| *idx as u32 == h.screen)
+                        .map(|(_, (o, info))| (Some(o), info.clone()))
+                        .unwrap_or((
+                            None,
+                            OutputInfo {
+                                name: "default".to_string(),
+                                x: 0,
+                                y: 0,
+                                width: 1920,
+                                height: 1080,
+                                scale: 1,
+                            },
+                        ));
+
                     if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
-                        let pointer = crate::pointer::VirtualPointer::new(manager, &qhandle);
-                        pointer.move_to(h.x, h.y, width, height);
+                        let pointer =
+                            crate::pointer::VirtualPointer::new(manager, target_output, &qhandle);
+                        pointer.move_to(h.x, h.y, target_info.width, target_info.height);
                         pointer.click(crate::pointer::MouseButton::Left);
                     }
-                    let _ =
-                        Config::execute_callback(&config.on_select_cmd, h.x, h.y, width, height);
+                    let _ = Config::execute_callback(
+                        &config.on_select_cmd,
+                        h.x,
+                        h.y,
+                        target_info.width,
+                        target_info.height,
+                    );
                 }
                 break;
             }
 
-            // Redraw filtered layout upon prefix buffer mutation
             if prefix != current_prefix {
                 current_prefix = prefix.clone();
                 info!("Input buffer mutated: {:?}", current_prefix);
@@ -588,31 +716,42 @@ impl Renderer {
                     .collect();
 
                 if matches.is_empty() {
-                    // Reset input prefix on mismatch
                     self.state.borrow_mut().input_buf.clear();
                     current_prefix.clear();
-                    draw_grid(&active_grid, "")?;
+                    draw_grid(&mut instances, &active_grid, "")?;
                 } else if matches.len() == 1 {
-                    // Match resolved!
                     let matched_hint = matches[0].clone();
 
                     if refinement_level < config.refinement_passes {
-                        // Subdivision refinement zoom
                         info!(
-                            "Triggering refinement pass {} for label='{}'",
+                            "Triggering refinement pass {} for label='{}' on screen {}",
                             refinement_level + 1,
-                            matched_hint.label
+                            matched_hint.label,
+                            matched_hint.screen
                         );
                         refinement_level += 1;
 
                         self.state.borrow_mut().input_buf.clear();
                         current_prefix.clear();
 
-                        // Derive subdivision boundaries
+                        let target_info = active_outputs
+                            .iter()
+                            .enumerate()
+                            .find(|(idx, _)| *idx as u32 == matched_hint.screen)
+                            .map(|(_, (_, info))| info.clone())
+                            .unwrap_or(OutputInfo {
+                                name: "default".to_string(),
+                                x: 0,
+                                y: 0,
+                                width: 1920,
+                                height: 1080,
+                                scale: 1,
+                            });
+
                         let unique_len =
                             HintGrid::get_unique_chars(&config.hint_chars).len() as i32;
-                        let cell_w = width / unique_len;
-                        let cell_h = height / unique_len;
+                        let cell_w = target_info.width / unique_len;
+                        let cell_h = target_info.height / unique_len;
                         let x_min = matched_hint.x - cell_w / 2;
                         let y_min = matched_hint.y - cell_h / 2;
                         let x_max = matched_hint.x + cell_w / 2;
@@ -624,47 +763,81 @@ impl Renderer {
                             x_max,
                             y_max,
                             &config.hint_chars,
-                            0,
+                            matched_hint.screen,
                         );
-                        draw_grid(&active_grid, "")?;
+                        draw_grid(&mut instances, &active_grid, "")?;
                     } else {
-                        // Select resolved
                         info!(
-                            "Warp target successfully resolved: ({}, {})",
-                            matched_hint.x, matched_hint.y
+                            "Warp target successfully resolved: ({}, {}) on screen {}",
+                            matched_hint.x, matched_hint.y, matched_hint.screen
                         );
+
+                        let (target_output, target_info) = active_outputs
+                            .iter()
+                            .enumerate()
+                            .find(|(idx, _)| *idx as u32 == matched_hint.screen)
+                            .map(|(_, (o, info))| (Some(o), info.clone()))
+                            .unwrap_or((
+                                None,
+                                OutputInfo {
+                                    name: "default".to_string(),
+                                    x: 0,
+                                    y: 0,
+                                    width: 1920,
+                                    height: 1080,
+                                    scale: 1,
+                                },
+                            ));
+
                         if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
-                            let pointer = crate::pointer::VirtualPointer::new(manager, &qhandle);
-                            pointer.move_to(matched_hint.x, matched_hint.y, width, height);
+                            let pointer = crate::pointer::VirtualPointer::new(
+                                manager,
+                                target_output,
+                                &qhandle,
+                            );
+                            pointer.move_to(
+                                matched_hint.x,
+                                matched_hint.y,
+                                target_info.width,
+                                target_info.height,
+                            );
                             pointer.click(crate::pointer::MouseButton::Left);
                         }
                         let _ = Config::execute_callback(
                             &config.on_select_cmd,
                             matched_hint.x,
                             matched_hint.y,
-                            width,
-                            height,
+                            target_info.width,
+                            target_info.height,
                         );
                         self.state.borrow_mut().running = false;
                     }
                 } else {
-                    // Dynamic filtering
-                    draw_grid(&active_grid, &current_prefix)?;
+                    draw_grid(&mut instances, &active_grid, &current_prefix)?;
                 }
-
-                wl_surface.attach(Some(&buffer), 0, 0);
-                wl_surface.damage(0, 0, width, height);
-                wl_surface.commit();
             }
 
-            std::thread::sleep(std::time::Duration::from_millis(16)); // Throttle loops to roughly ~60hz
+            std::thread::sleep(std::time::Duration::from_millis(16));
         }
 
-        let _ = Config::execute_callback(&config.on_exit_cmd, 0, 0, width, height);
+        // Final exit callback
+        if let Some(inst) = instances.first() {
+            let _ = Config::execute_callback(
+                &config.on_exit_cmd,
+                0,
+                0,
+                inst.info.width,
+                inst.info.height,
+            );
+        } else {
+            let _ = Config::execute_callback(&config.on_exit_cmd, 0, 0, 1920, 1080);
+        }
 
-        // Clean up resources
-        unsafe {
-            libc::munmap(ptr as *mut libc::c_void, size);
+        // Clean up resources securely
+        for inst in instances {
+            unsafe {
+                libc::munmap(inst.ptr as *mut libc::c_void, inst.size);
+            }
         }
 
         Ok(())

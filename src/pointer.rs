@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use crate::render::AppState;
-use wayland_client::{QueueHandle, protocol::wl_pointer};
+use wayland_client::{
+    QueueHandle,
+    protocol::{wl_output, wl_pointer},
+};
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
@@ -26,9 +29,14 @@ pub struct VirtualPointer {
 impl VirtualPointer {
     pub fn new(
         manager: &zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1,
+        output: Option<&wl_output::WlOutput>,
         qhandle: &QueueHandle<AppState>,
     ) -> Self {
-        let pointer = manager.create_virtual_pointer(None, qhandle, ());
+        let pointer = if output.is_some() {
+            manager.create_virtual_pointer_with_output(None, output, qhandle, ())
+        } else {
+            manager.create_virtual_pointer(None, qhandle, ())
+        };
         Self { pointer }
     }
 
