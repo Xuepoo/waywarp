@@ -1,5 +1,7 @@
 # waywarp
 
+English | [简体中文](./README.zh-CN.md)
+
 A high-performance, keyboard-driven mouse control tool for Wayland compositors (wlroots-based).
 
 ## Features
@@ -46,7 +48,10 @@ waywarp --list-hints --format json
 waywarp --select "fa"
 
 # Direct coordinate + click
-waywarp --move 800 460 --click left
+waywarp --move-to 800 460 --click left
+
+# Relative coordinate move + click (v0.1.2+)
+waywarp --move-by 50 -30 --click left
 ```
 
 ## Configuration

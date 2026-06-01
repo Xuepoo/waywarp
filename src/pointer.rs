@@ -48,6 +48,13 @@ impl VirtualPointer {
         self.pointer.frame();
     }
 
+    /// Move physical cursor by relative coordinate offsets (dx, dy)
+    pub fn move_by(&self, dx: f64, dy: f64) {
+        let time = 0;
+        self.pointer.motion(time, dx, dy);
+        self.pointer.frame();
+    }
+
     /// Simulate physical hardware click button events
     pub fn click(&self, button: MouseButton) {
         let btn_code = match button {

@@ -27,6 +27,10 @@ struct Args {
     #[arg(long, num_args = 2)]
     move_to: Option<Vec<i32>>,
 
+    /// Move cursor by relative coordinate offsets (dx dy)
+    #[arg(long, num_args = 2)]
+    move_by: Option<Vec<i32>>,
+
     /// Click type
     #[arg(long, value_enum, default_value = "left")]
     click: ClickType,
@@ -78,6 +82,16 @@ fn main() -> anyhow::Result<()> {
             ClickType::Middle => pointer::MouseButton::Middle,
         };
         agent::AgentMode::move_to(coords[0], coords[1], Some(mouse_btn), &_config)?;
+        return Ok(());
+    }
+
+    if let Some(offsets) = &args.move_by {
+        let mouse_btn = match args.click {
+            ClickType::Left => pointer::MouseButton::Left,
+            ClickType::Right => pointer::MouseButton::Right,
+            ClickType::Middle => pointer::MouseButton::Middle,
+        };
+        agent::AgentMode::move_by(offsets[0], offsets[1], Some(mouse_btn), &_config)?;
         return Ok(());
     }
 

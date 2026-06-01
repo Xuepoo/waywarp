@@ -270,4 +270,62 @@ impl AgentMode {
 
         Ok(())
     }
+
+    /// Directly moving cursor by relative offsets, optionally triggering button clicks
+    pub fn move_by(
+        dx: i32,
+        dy: i32,
+        click: Option<MouseButton>,
+        config: &Config,
+    ) -> anyhow::Result<()> {
+        let (_conn, state, qhandle, active_outputs) = Self::setup_headless()?;
+        let (target_output, target_info) = active_outputs
+            .first()
+            .map(|(o, info)| (Some(o), info.clone()))
+            .unwrap_or((
+                None,
+                OutputInfo {
+                    name: "default".to_string(),
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1080,
+                    scale: 1,
+                },
+            ));
+
+        info!(
+            "Headless move_by resolved offsets: ({}, {}) on screen {:?}",
+            dx, dy, target_info.name
+        );
+
+        if let Some(ref manager) = state.borrow().virtual_pointer_manager {
+            let pointer = VirtualPointer::new(manager, target_output, &qhandle);
+            pointer.move_by(dx as f64, dy as f64);
+
+            if let Some(btn) = click {
+                pointer.click(btn);
+            }
+        } else {
+            warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
+        }
+
+        // Trigger callbacks
+        Config::execute_callback(
+            &config.on_select_cmd,
+            dx,
+            dy,
+            target_info.width,
+            target_info.height,
+        )?;
+        Config::execute_callback(
+            &config.on_exit_cmd,
+            0,
+            0,
+            target_info.width,
+            target_info.height,
+        )?;
+
+        Ok(())
+    }
 }
