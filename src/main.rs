@@ -62,20 +62,22 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     if args.list_hints {
-        // TODO: Implement hint listing
-        println!("{{\"hints\": [], \"message\": \"not yet implemented\"}}");
+        agent::AgentMode::list_hints(&_config)?;
         return Ok(());
     }
 
     if let Some(label) = &args.select {
-        // TODO: Implement hint selection
-        println!("Selected hint: {label}");
+        agent::AgentMode::select_hint(label, &_config)?;
         return Ok(());
     }
 
     if let Some(coords) = &args.move_to {
-        // TODO: Implement cursor movement
-        println!("Moving to ({}, {})", coords[0], coords[1]);
+        let mouse_btn = match args.click {
+            ClickType::Left => pointer::MouseButton::Left,
+            ClickType::Right => pointer::MouseButton::Right,
+            ClickType::Middle => pointer::MouseButton::Middle,
+        };
+        agent::AgentMode::move_to(coords[0], coords[1], Some(mouse_btn), &_config)?;
         return Ok(());
     }
 
