@@ -51,13 +51,16 @@ waywarp --move 800 460 --click left
 
 ## Configuration
 
-`~/.config/waywarp/config`:
+Waywarp automatically creates a default configuration file at `~/.config/waywarp/config` on its first run if it does not exist.
 
 ```ini
-on_select_cmd=hyprctl dispatch movecursor {x} {y} && ydotool click 0xC0
-hint_font=JetBrainsMono Nerd Font
-hint_size=22
+# ~/.config/waywarp/config
+on_select_cmd=hyprctl dispatch movecursor {global_x} {global_y}
+hint_font=monospace
+hint_size=18
 ```
+
+For the complete documentation of all configuration options, callbacks, dynamic variables, and integration recipes, refer to the [Waywarp Configuration Guide](docs/configuration.md).
 
 ## License
 
