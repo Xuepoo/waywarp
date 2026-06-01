@@ -4,22 +4,30 @@
 # --- Build stage ---
 FROM rust:latest AS builder
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libwayland-dev \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libxkbcommon-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 
-# Cache dependencies by building with empty main first
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs
-RUN cargo build --release && rm -rf src
-
-# Build the actual binary
+# Copy source and build
 COPY . .
-RUN touch src/main.rs && cargo build --release --locked
+RUN cargo build --release
 
 # --- Runtime stage ---
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    libwayland-client0 \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/waywarp /usr/local/bin/waywarp
