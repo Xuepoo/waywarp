@@ -54,7 +54,7 @@ jobs:
       - name: Build release binary
         shell: bash
         run: |
-          cargo build --release --locked --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Package archive
         shell: bash
@@ -125,13 +125,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish --locked
+      - run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-
-
-  # ---------------------------------------------------------------------------
   # Update AUR package
   # ---------------------------------------------------------------------------
   publish-aur:
