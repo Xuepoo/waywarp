@@ -81,7 +81,7 @@ fn main() -> anyhow::Result<()> {
 
     // Default: interactive hint mode
     let config = config::Config::load();
-    let grid = hint::HintGrid::new();
+    let grid = hint::HintGrid::new(0, 0, 0);
     let mut renderer = render::Renderer::new()?;
     renderer.draw_overlay(&grid, &config)?;
 
