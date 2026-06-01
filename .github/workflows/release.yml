@@ -107,9 +107,9 @@ jobs:
           export ARCH
           export BINARY_SRC="./waywarp"
 
-          ./nfpm pkg --packager deb --target waywarp-linux-${PKG_ARCH}.deb
-          ./nfpm pkg --packager rpm --target waywarp-linux-${PKG_ARCH}.rpm
-          ./nfpm pkg --packager archlinux --target waywarp-linux-${PKG_ARCH}.pkg.tar.zst
+          ./nfpm pkg --config packaging/nfpm.yaml --packager deb --target waywarp-linux-${PKG_ARCH}.deb
+          ./nfpm pkg --config packaging/nfpm.yaml --packager rpm --target waywarp-linux-${PKG_ARCH}.rpm
+          ./nfpm pkg --config packaging/nfpm.yaml --packager archlinux --target waywarp-linux-${PKG_ARCH}.pkg.tar.zst
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
