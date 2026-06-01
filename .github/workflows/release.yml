@@ -83,7 +83,8 @@ jobs:
             VERSION="0.1.0"
           fi
           cd packaging
-          VERSION=$VERSION nfpm package --config nfpm.yaml --target ..
+          VERSION=$VERSION nfpm package --config nfpm.yaml --packager deb --target ..
+          VERSION=$VERSION nfpm package --config nfpm.yaml --packager rpm --target ..
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
