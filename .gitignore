@@ -27,3 +27,4 @@ Thumbs.db
 *.profraw
 lcov.info
 tarpaulin-report.html
+.hermes/

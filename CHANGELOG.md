@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-06-02
+
+### Added
+- **Continuous Keyboard Normal Mode (Cursor Mode)**: Implemented continuous cursor sliding using `hjkl` or arrow keys with sub-16ms tick rate (~60Hz) for smooth movements.
+- **Dynamic Speed & Acceleration**: Integrated keyboard modifiers (`Shift` for 3x speed boost, `Control` for 0.25x precision reduction) along with dynamic cursor acceleration over time.
+- **Simulated Mouse Actions**: Added keysym mappings in Normal Mode for Left Click (`f` or `Return`), Right Click (`d`), Middle Click (`s`), Scroll Up (`u`), and Scroll Down (`e`).
+- **Command Line Mode Integration**: Added a `--normal` boolean CLI argument to start Waywarp directly in Normal Mode overlay.
+- **Customizable Normal Mode Keybindings**: Enabled full keybinding customization inside `~/.config/waywarp/config` (supporting comma-separated fallback lists like `key_left=h,Left`). Parses standard XKB keysym names dynamically at runtime.
+
 ---
 
 ## [0.1.2] - 2026-06-01

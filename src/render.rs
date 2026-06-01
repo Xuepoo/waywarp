@@ -20,6 +20,12 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionMode {
+    Hint,
+    Normal,
+}
+
 /// Active state tracking for our Wayland connection
 pub struct AppState {
     pub virtual_pointer_manager:
@@ -45,6 +51,35 @@ pub struct AppState {
     pub input_buf: String,
     pub selection_made: bool,
     pub canceled: bool,
+
+    // Normal Mode (cursor drive) states
+    pub mode: InteractionMode,
+    pub left_pressed: bool,
+    pub right_pressed: bool,
+    pub up_pressed: bool,
+    pub down_pressed: bool,
+    pub shift_pressed: bool,
+    pub ctrl_pressed: bool,
+    pub acceleration_factor: f64,
+    pub click_action: Option<crate::pointer::MouseButton>,
+    pub scroll_action: Option<crate::pointer::ScrollDirection>,
+    pub key_bindings: Option<NormalKeyBindings>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NormalKeyBindings {
+    pub left: Vec<u32>,
+    pub right: Vec<u32>,
+    pub up: Vec<u32>,
+    pub down: Vec<u32>,
+    pub shift: Vec<u32>,
+    pub ctrl: Vec<u32>,
+    pub click_left: Vec<u32>,
+    pub click_right: Vec<u32>,
+    pub click_middle: Vec<u32>,
+    pub scroll_up: Vec<u32>,
+    pub scroll_down: Vec<u32>,
+    pub exit: Vec<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +115,18 @@ impl AppState {
             input_buf: String::new(),
             selection_made: false,
             canceled: false,
+
+            mode: InteractionMode::Hint,
+            left_pressed: false,
+            right_pressed: false,
+            up_pressed: false,
+            down_pressed: false,
+            shift_pressed: false,
+            ctrl_pressed: false,
+            acceleration_factor: 1.0,
+            click_action: None,
+            scroll_action: None,
+            key_bindings: None,
         }
     }
 }
@@ -276,7 +323,7 @@ struct OverlayInstance {
 
 pub struct Renderer {
     conn: Connection,
-    state: Rc<RefCell<AppState>>,
+    pub state: Rc<RefCell<AppState>>,
 }
 
 impl Renderer {
@@ -353,6 +400,22 @@ impl Renderer {
 
     /// Primary execution loop to present interactive transparent layout overlay
     pub fn draw_overlay(&mut self, _grid: &HintGrid, config: &Config) -> anyhow::Result<()> {
+        let bindings = NormalKeyBindings {
+            left: resolve_keysyms(&config.key_left),
+            right: resolve_keysyms(&config.key_right),
+            up: resolve_keysyms(&config.key_up),
+            down: resolve_keysyms(&config.key_down),
+            shift: resolve_keysyms(&config.key_shift),
+            ctrl: resolve_keysyms(&config.key_ctrl),
+            click_left: resolve_keysyms(&config.key_click_left),
+            click_right: resolve_keysyms(&config.key_click_right),
+            click_middle: resolve_keysyms(&config.key_click_middle),
+            scroll_up: resolve_keysyms(&config.key_scroll_up),
+            scroll_down: resolve_keysyms(&config.key_scroll_down),
+            exit: resolve_keysyms(&config.key_exit),
+        };
+        self.state.borrow_mut().key_bindings = Some(bindings);
+
         let mut event_queue = self.conn.new_event_queue();
         let qhandle = event_queue.handle();
 
@@ -532,103 +595,111 @@ impl Renderer {
         };
 
         // Multi-monitor repaint closure
-        let draw_grid = |instances: &mut [OverlayInstance],
-                         grid: &HintGrid,
-                         prefix: &str|
-         -> anyhow::Result<()> {
+        let app_state_ref = self.state.clone();
+        let draw_grid = move |instances: &mut [OverlayInstance],
+                              grid: &HintGrid,
+                              prefix: &str|
+              -> anyhow::Result<()> {
+            let is_normal = app_state_ref.borrow().mode == InteractionMode::Normal;
             for inst in instances {
                 let cr = &inst.cairo_context;
                 let info = &inst.info;
 
-                let has_matches = grid
-                    .hints
-                    .iter()
-                    .any(|h| h.screen == inst.screen_index && h.label.starts_with(prefix));
-
-                if !prefix.is_empty() && !has_matches {
-                    // Repaint screen as fully transparent if no matching hints are left
+                if is_normal {
                     cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
                     cr.set_operator(cairo::Operator::Source);
                     cr.paint()?;
                 } else {
-                    cr.set_source_rgba(0.0, 0.0, 0.0, 0.2);
-                    cr.set_operator(cairo::Operator::Source);
-                    cr.paint()?;
+                    let has_matches = grid
+                        .hints
+                        .iter()
+                        .any(|h| h.screen == inst.screen_index && h.label.starts_with(prefix));
 
-                    for hint in &grid.hints {
-                        if hint.screen != inst.screen_index {
-                            continue;
+                    if !prefix.is_empty() && !has_matches {
+                        // Repaint screen as fully transparent if no matching hints are left
+                        cr.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+                        cr.set_operator(cairo::Operator::Source);
+                        cr.paint()?;
+                    } else {
+                        cr.set_source_rgba(0.0, 0.0, 0.0, 0.2);
+                        cr.set_operator(cairo::Operator::Source);
+                        cr.paint()?;
+
+                        for hint in &grid.hints {
+                            if hint.screen != inst.screen_index {
+                                continue;
+                            }
+                            if !hint.label.starts_with(prefix) {
+                                continue;
+                            }
+
+                            let label_w = hint.width as f64;
+                            let label_h = hint.height as f64;
+                            let x = hint.x as f64;
+                            let y = hint.y as f64;
+
+                            cr.set_operator(cairo::Operator::Over);
+                            cr.set_source_rgba(
+                                config.hint_bg[0],
+                                config.hint_bg[1],
+                                config.hint_bg[2],
+                                config.hint_bg[3],
+                            );
+
+                            let r = config.hint_border_radius;
+                            cr.new_sub_path();
+                            cr.arc(
+                                x - label_w / 2.0 + r,
+                                y - label_h / 2.0 + r,
+                                r,
+                                180.0 * std::f64::consts::PI / 180.0,
+                                270.0 * std::f64::consts::PI / 180.0,
+                            );
+                            cr.arc(
+                                x + label_w / 2.0 - r,
+                                y - label_h / 2.0 + r,
+                                r,
+                                270.0 * std::f64::consts::PI / 180.0,
+                                360.0 * std::f64::consts::PI / 180.0,
+                            );
+                            cr.arc(
+                                x + label_w / 2.0 - r,
+                                y + label_h / 2.0 - r,
+                                r,
+                                0.0 * std::f64::consts::PI / 180.0,
+                                90.0 * std::f64::consts::PI / 180.0,
+                            );
+                            cr.arc(
+                                x - label_w / 2.0 + r,
+                                y + label_h / 2.0 - r,
+                                r,
+                                90.0 * std::f64::consts::PI / 180.0,
+                                180.0 * std::f64::consts::PI / 180.0,
+                            );
+                            cr.close_path();
+                            cr.fill()?;
+
+                            cr.set_source_rgba(
+                                config.hint_fg[0],
+                                config.hint_fg[1],
+                                config.hint_fg[2],
+                                config.hint_fg[3],
+                            );
+
+                            cr.select_font_face(
+                                &config.hint_font,
+                                cairo::FontSlant::Normal,
+                                cairo::FontWeight::Normal,
+                            );
+                            cr.set_font_size(config.hint_size as f64);
+
+                            let extents = cr.text_extents(&hint.label)?;
+                            cr.move_to(
+                                x - extents.width() / 2.0 - extents.x_bearing(),
+                                y - extents.height() / 2.0 - extents.y_bearing(),
+                            );
+                            cr.show_text(&hint.label)?;
                         }
-                        if !hint.label.starts_with(prefix) {
-                            continue;
-                        }
-
-                        let label_w = hint.width as f64;
-                        let label_h = hint.height as f64;
-                        let x = hint.x as f64;
-                        let y = hint.y as f64;
-
-                        cr.set_operator(cairo::Operator::Over);
-                        cr.set_source_rgba(
-                            config.hint_bg[0],
-                            config.hint_bg[1],
-                            config.hint_bg[2],
-                            config.hint_bg[3],
-                        );
-
-                        let r = config.hint_border_radius;
-                        cr.new_sub_path();
-                        cr.arc(
-                            x - label_w / 2.0 + r,
-                            y - label_h / 2.0 + r,
-                            r,
-                            180.0 * std::f64::consts::PI / 180.0,
-                            270.0 * std::f64::consts::PI / 180.0,
-                        );
-                        cr.arc(
-                            x + label_w / 2.0 - r,
-                            y - label_h / 2.0 + r,
-                            r,
-                            270.0 * std::f64::consts::PI / 180.0,
-                            360.0 * std::f64::consts::PI / 180.0,
-                        );
-                        cr.arc(
-                            x + label_w / 2.0 - r,
-                            y + label_h / 2.0 - r,
-                            r,
-                            0.0 * std::f64::consts::PI / 180.0,
-                            90.0 * std::f64::consts::PI / 180.0,
-                        );
-                        cr.arc(
-                            x - label_w / 2.0 + r,
-                            y + label_h / 2.0 - r,
-                            r,
-                            90.0 * std::f64::consts::PI / 180.0,
-                            180.0 * std::f64::consts::PI / 180.0,
-                        );
-                        cr.close_path();
-                        cr.fill()?;
-
-                        cr.set_source_rgba(
-                            config.hint_fg[0],
-                            config.hint_fg[1],
-                            config.hint_fg[2],
-                            config.hint_fg[3],
-                        );
-
-                        cr.select_font_face(
-                            &config.hint_font,
-                            cairo::FontSlant::Normal,
-                            cairo::FontWeight::Normal,
-                        );
-                        cr.set_font_size(config.hint_size as f64);
-
-                        let extents = cr.text_extents(&hint.label)?;
-                        cr.move_to(
-                            x - extents.width() / 2.0 - extents.x_bearing(),
-                            y - extents.height() / 2.0 - extents.y_bearing(),
-                        );
-                        cr.show_text(&hint.label)?;
                     }
                 }
                 inst.cairo_surface.flush();
@@ -650,6 +721,89 @@ impl Renderer {
 
         while self.state.borrow().running {
             event_queue.roundtrip(&mut *self.state.borrow_mut())?;
+
+            if self.state.borrow().mode == InteractionMode::Normal {
+                let (left, right, up, down, shift, ctrl, click_act, scroll_act, canceled) = {
+                    let s = self.state.borrow();
+                    (
+                        s.left_pressed,
+                        s.right_pressed,
+                        s.up_pressed,
+                        s.down_pressed,
+                        s.shift_pressed,
+                        s.ctrl_pressed,
+                        s.click_action,
+                        s.scroll_action,
+                        s.canceled,
+                    )
+                };
+
+                if canceled {
+                    break;
+                }
+
+                // Handle relative movement
+                let mut dx = 0.0;
+                let mut dy = 0.0;
+                let moving = left || right || up || down;
+
+                if moving {
+                    // Update acceleration
+                    let mut s = self.state.borrow_mut();
+                    let current_acc = s.acceleration_factor;
+                    s.acceleration_factor = (current_acc + 0.15).min(4.0);
+
+                    let base_speed = 10.0;
+                    let speed = if shift {
+                        base_speed * 3.0
+                    } else if ctrl {
+                        base_speed / 4.0
+                    } else {
+                        base_speed
+                    };
+
+                    let acc = s.acceleration_factor;
+                    let x_dir = (right as i32 - left as i32) as f64;
+                    let y_dir = (down as i32 - up as i32) as f64;
+                    dx = x_dir * speed * acc;
+                    dy = y_dir * speed * acc;
+                } else {
+                    self.state.borrow_mut().acceleration_factor = 1.0;
+                }
+
+                if dx != 0.0 || dy != 0.0 {
+                    let manager_opt = self.state.borrow().virtual_pointer_manager.clone();
+                    if let Some(manager) = manager_opt {
+                        let pointer = crate::pointer::VirtualPointer::new(&manager, None, &qhandle);
+                        pointer.move_by(dx, dy);
+                    }
+                }
+
+                // Handle single action clicks
+                if let Some(btn) = click_act {
+                    if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
+                        let pointer = crate::pointer::VirtualPointer::new(manager, None, &qhandle);
+                        pointer.click(btn);
+                    }
+                    self.state.borrow_mut().click_action = None;
+                    if config.exit_on_select {
+                        self.state.borrow_mut().running = false;
+                        break;
+                    }
+                }
+
+                // Handle scroll actions
+                if let Some(dir) = scroll_act {
+                    if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
+                        let pointer = crate::pointer::VirtualPointer::new(manager, None, &qhandle);
+                        pointer.scroll(dir, 15);
+                    }
+                    self.state.borrow_mut().scroll_action = None;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(16));
+                continue;
+            }
 
             let (prefix, selection_made, canceled) = {
                 let s = self.state.borrow();
@@ -842,4 +996,20 @@ impl Renderer {
 
         Ok(())
     }
+}
+
+fn resolve_keysyms(comma_separated: &str) -> Vec<u32> {
+    comma_separated
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .filter_map(|name| {
+            let sym = xkbcommon::xkb::keysym_from_name(name, xkbcommon::xkb::KEYSYM_NO_FLAGS);
+            if sym == xkbcommon::xkb::keysyms::KEY_NoSymbol.into() {
+                None
+            } else {
+                Some(sym.raw())
+            }
+        })
+        .collect()
 }

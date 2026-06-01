@@ -9,12 +9,14 @@ use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {
     Left,
     Right,
     Middle,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollDirection {
     Up,
     Down,

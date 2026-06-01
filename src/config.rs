@@ -21,6 +21,20 @@ pub struct Config {
     pub exit_on_select: bool,    // Close automatically after warp
     pub on_select_cmd: String,   // Command callback post-warp
     pub on_exit_cmd: String,     // Command callback on exit
+
+    // Keybindings for Normal Mode
+    pub key_left: String,
+    pub key_right: String,
+    pub key_up: String,
+    pub key_down: String,
+    pub key_shift: String,
+    pub key_ctrl: String,
+    pub key_click_left: String,
+    pub key_click_right: String,
+    pub key_click_middle: String,
+    pub key_scroll_up: String,
+    pub key_scroll_down: String,
+    pub key_exit: String,
 }
 
 impl Default for Config {
@@ -36,6 +50,19 @@ impl Default for Config {
             exit_on_select: true,
             on_select_cmd: "hyprctl dispatch movecursor {global_x} {global_y}".to_string(),
             on_exit_cmd: "".to_string(),
+
+            key_left: "h,Left".to_string(),
+            key_right: "l,Right".to_string(),
+            key_up: "k,Up".to_string(),
+            key_down: "j,Down".to_string(),
+            key_shift: "Shift_L,Shift_R".to_string(),
+            key_ctrl: "Control_L,Control_R".to_string(),
+            key_click_left: "f,Return".to_string(),
+            key_click_right: "d".to_string(),
+            key_click_middle: "s".to_string(),
+            key_scroll_up: "u".to_string(),
+            key_scroll_down: "e".to_string(),
+            key_exit: "Escape,q,Q".to_string(),
         }
     }
 }
@@ -114,6 +141,18 @@ impl Config {
             "on_select_cmd=hyprctl dispatch movecursor {{global_x}} {{global_y}}"
         )?;
         writeln!(file, "on_exit_cmd=")?;
+        writeln!(file, "key_left=h,Left")?;
+        writeln!(file, "key_right=l,Right")?;
+        writeln!(file, "key_up=k,Up")?;
+        writeln!(file, "key_down=j,Down")?;
+        writeln!(file, "key_shift=Shift_L,Shift_R")?;
+        writeln!(file, "key_ctrl=Control_L,Control_R")?;
+        writeln!(file, "key_click_left=f,Return")?;
+        writeln!(file, "key_click_right=d")?;
+        writeln!(file, "key_click_middle=s")?;
+        writeln!(file, "key_scroll_up=u")?;
+        writeln!(file, "key_scroll_down=e")?;
+        writeln!(file, "key_exit=Escape,q,Q")?;
         Ok(())
     }
 
@@ -192,6 +231,42 @@ impl Config {
                 }
                 "on_exit_cmd" => {
                     config.on_exit_cmd = val.to_string();
+                }
+                "key_left" => {
+                    config.key_left = val.to_string();
+                }
+                "key_right" => {
+                    config.key_right = val.to_string();
+                }
+                "key_up" => {
+                    config.key_up = val.to_string();
+                }
+                "key_down" => {
+                    config.key_down = val.to_string();
+                }
+                "key_shift" => {
+                    config.key_shift = val.to_string();
+                }
+                "key_ctrl" => {
+                    config.key_ctrl = val.to_string();
+                }
+                "key_click_left" => {
+                    config.key_click_left = val.to_string();
+                }
+                "key_click_right" => {
+                    config.key_click_right = val.to_string();
+                }
+                "key_click_middle" => {
+                    config.key_click_middle = val.to_string();
+                }
+                "key_scroll_up" => {
+                    config.key_scroll_up = val.to_string();
+                }
+                "key_scroll_down" => {
+                    config.key_scroll_down = val.to_string();
+                }
+                "key_exit" => {
+                    config.key_exit = val.to_string();
                 }
                 _ => {
                     warn!("Line {}: unknown configuration key '{}'", line_num + 1, key);

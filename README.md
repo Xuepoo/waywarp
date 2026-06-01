@@ -52,7 +52,29 @@ waywarp --move-to 800 460 --click left
 
 # Relative coordinate move + click (v0.1.2+)
 waywarp --move-by 50 -30 --click left
+
+# Start in continuous Normal Mode (cursor drive) (v0.1.3+)
+waywarp --normal
 ```
+
+### Normal Mode Keybindings (Cursor Mode)
+
+When starting with `waywarp --normal`, you enter a continuous keyboard-driven mouse pointer mode:
+
+| Key | Action |
+| --- | --- |
+| `h` / `Left Arrow` | Move cursor left |
+| `j` / `Down Arrow` | Move cursor down |
+| `k` / `Up Arrow` | Move cursor up |
+| `l` / `Right Arrow` | Move cursor right |
+| `Shift` (hold) | 3x Speed Boost (Fast acceleration) |
+| `Control` (hold) | 0.25x Speed Divisor (Fine precision) |
+| `f` / `Return` | Left Click (Exits if `exit_on_select` is enabled) |
+| `d` | Right Click (Exits if `exit_on_select` is enabled) |
+| `s` | Middle Click |
+| `u` | Scroll Up |
+| `e` | Scroll Down |
+| `Escape` / `q` | Exit Normal Mode |
 
 ## Configuration
 

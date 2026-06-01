@@ -27,6 +27,18 @@ Below is a detailed breakdown of all supported keys in the configuration file, a
 | `exit_on_select` | `true` | Automatically close the hint overlays and exit the program once a final selection is made. |
 | `on_select_cmd` | *See below* | Shell callback executed immediately after warping. Supports dynamic variable placeholders. |
 | `on_exit_cmd` | *(Empty)* | Shell callback executed when the user manually cancels or exits without warping. |
+| `key_left` | `h,Left` | Comma-separated list of keys/keysyms mapping to Left movement in Normal Mode. |
+| `key_right` | `l,Right` | Comma-separated list of keys/keysyms mapping to Right movement in Normal Mode. |
+| `key_up` | `k,Up` | Comma-separated list of keys/keysyms mapping to Up movement in Normal Mode. |
+| `key_down` | `j,Down` | Comma-separated list of keys/keysyms mapping to Down movement in Normal Mode. |
+| `key_shift` | `Shift_L,Shift_R` | Comma-separated list of keys/keysyms mapping to Speed Boost (3x speed) in Normal Mode. |
+| `key_ctrl` | `Control_L,Control_R` | Comma-separated list of keys/keysyms mapping to Speed Divisor (0.25x speed) in Normal Mode. |
+| `key_click_left` | `f,Return` | Comma-separated list of keys/keysyms mapping to Mouse Left Click in Normal Mode. |
+| `key_click_right` | `d` | Comma-separated list of keys/keysyms mapping to Mouse Right Click in Normal Mode. |
+| `key_click_middle` | `s` | Comma-separated list of keys/keysyms mapping to Mouse Middle Click in Normal Mode. |
+| `key_scroll_up` | `u` | Comma-separated list of keys/keysyms mapping to Scroll Up in Normal Mode. |
+| `key_scroll_down` | `e` | Comma-separated list of keys/keysyms mapping to Scroll Down in Normal Mode. |
+| `key_exit` | `Escape,q,Q` | Comma-separated list of keys/keysyms mapping to Exit in Normal Mode. |
 
 ---
 

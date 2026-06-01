@@ -42,6 +42,10 @@ struct Args {
     /// One-shot mode: exit after first selection
     #[arg(long)]
     oneshot: bool,
+
+    /// Start in continuous Normal Mode (cursor drive)
+    #[arg(long)]
+    normal: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -99,6 +103,9 @@ fn main() -> anyhow::Result<()> {
     let config = config::Config::load();
     let grid = hint::HintGrid::new(0, 0, 0);
     let mut renderer = render::Renderer::new()?;
+    if args.normal {
+        renderer.state.borrow_mut().mode = render::InteractionMode::Normal;
+    }
     renderer.draw_overlay(&grid, &config)?;
 
     Ok(())
