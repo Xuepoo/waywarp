@@ -1,5 +1,11 @@
 #![allow(dead_code)]
 
+use crate::render::AppState;
+use wayland_client::{QueueHandle, protocol::wl_pointer};
+use wayland_protocols_wlr::virtual_pointer::v1::client::{
+    zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
+};
+
 pub enum MouseButton {
     Left,
     Right,
@@ -14,38 +20,91 @@ pub enum ScrollDirection {
 }
 
 pub struct VirtualPointer {
-    // Virtual pointer state goes here
+    pointer: zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
 }
 
 impl VirtualPointer {
-    pub fn new() -> anyhow::Result<Self> {
-        // TODO: Bind zwlr_virtual_pointer_v1
-        Ok(Self {})
+    pub fn new(
+        manager: &zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1,
+        qhandle: &QueueHandle<AppState>,
+    ) -> Self {
+        let pointer = manager.create_virtual_pointer(None, qhandle, ());
+        Self { pointer }
     }
 
-    pub fn move_to(&mut self, _x: i32, _y: i32) -> anyhow::Result<()> {
-        // TODO: Simulate move event
-        Ok(())
+    /// Warp physical cursor to absolute coordinates
+    pub fn move_to(&self, x: i32, y: i32, screen_w: i32, screen_h: i32) {
+        let time = 0;
+        self.pointer
+            .motion_absolute(time, x as u32, y as u32, screen_w as u32, screen_h as u32);
+        self.pointer.frame();
     }
 
-    pub fn click(&mut self, _button: MouseButton) -> anyhow::Result<()> {
-        // TODO: Simulate click press and release events
-        Ok(())
+    /// Simulate physical hardware click button events
+    pub fn click(&self, button: MouseButton) {
+        let btn_code = match button {
+            MouseButton::Left => 0x110,   // BTN_LEFT
+            MouseButton::Right => 0x111,  // BTN_RIGHT
+            MouseButton::Middle => 0x112, // BTN_MIDDLE
+        };
+        let time = 0;
+
+        // Press
+        self.pointer
+            .button(time, btn_code, wl_pointer::ButtonState::Pressed);
+        self.pointer.frame();
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Release
+        self.pointer
+            .button(time, btn_code, wl_pointer::ButtonState::Released);
+        self.pointer.frame();
     }
 
-    pub fn scroll(&mut self, _direction: ScrollDirection, _distance: i32) -> anyhow::Result<()> {
-        // TODO: Simulate scroll events
-        Ok(())
+    /// Simulate scrolling wheel events
+    pub fn scroll(&self, direction: ScrollDirection, distance: i32) {
+        let time = 0;
+        // Axis 0 is Vertical, Axis 1 is Horizontal in Wayland
+        let axis = match direction {
+            ScrollDirection::Up | ScrollDirection::Down => wl_pointer::Axis::VerticalScroll,
+            ScrollDirection::Left | ScrollDirection::Right => wl_pointer::Axis::HorizontalScroll,
+        };
+        let value = match direction {
+            ScrollDirection::Up | ScrollDirection::Left => -distance,
+            ScrollDirection::Down | ScrollDirection::Right => distance,
+        };
+
+        self.pointer.axis(time, axis, value as f64);
+        self.pointer.frame();
     }
 
+    /// Emulate hardware cursor drag gesture from start to end coordinates
     pub fn drag_to(
-        &mut self,
-        _start_x: i32,
-        _start_y: i32,
-        _end_x: i32,
-        _end_y: i32,
-    ) -> anyhow::Result<()> {
-        // TODO: Simulate drag event
-        Ok(())
+        &self,
+        start_x: i32,
+        start_y: i32,
+        end_x: i32,
+        end_y: i32,
+        screen_w: i32,
+        screen_h: i32,
+    ) {
+        self.move_to(start_x, start_y, screen_w, screen_h);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Press Left Button
+        self.pointer
+            .button(0, 0x110, wl_pointer::ButtonState::Pressed);
+        self.pointer.frame();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Move to end position
+        self.move_to(end_x, end_y, screen_w, screen_h);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Release
+        self.pointer
+            .button(0, 0x110, wl_pointer::ButtonState::Released);
+        self.pointer.frame();
     }
 }

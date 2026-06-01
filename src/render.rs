@@ -16,9 +16,14 @@ use wayland_client::{
 };
 
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
+use wayland_protocols_wlr::virtual_pointer::v1::client::{
+    zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
+};
 
 /// Active state tracking for our Wayland connection
 pub struct AppState {
+    pub virtual_pointer_manager:
+        Option<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1>,
     pub running: bool,
     pub configured: bool,
     pub compositor: Option<wl_compositor::WlCompositor>,
@@ -55,6 +60,7 @@ pub struct OutputInfo {
 impl AppState {
     pub fn new() -> Self {
         Self {
+            virtual_pointer_manager: None,
             running: true,
             configured: false,
             compositor: None,
@@ -125,6 +131,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
                 }
                 "wl_seat" => {
                     state.seat = Some(registry.bind::<wl_seat::WlSeat, _, _>(name, 4, qhandle, ()));
+                }
+                "zwlr_virtual_pointer_manager_v1" => {
+                    state.virtual_pointer_manager = Some(registry.bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _, _>(name, 2, qhandle, ()));
                 }
                 _ => {}
             }
@@ -244,6 +253,8 @@ delegate_noop!(AppState: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(AppState: ignore wl_buffer::WlBuffer);
 delegate_noop!(AppState: ignore wl_surface::WlSurface);
 delegate_noop!(AppState: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+delegate_noop!(AppState: ignore zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1);
+delegate_noop!(AppState: ignore zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1);
 
 // -----------------------------------------------------------------------------
 // Renderer Implementation
@@ -554,6 +565,13 @@ impl Renderer {
                         "Selection forced confirm: label='{}' at ({}, {})",
                         h.label, h.x, h.y
                     );
+                    if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
+                        let pointer = crate::pointer::VirtualPointer::new(manager, &qhandle);
+                        pointer.move_to(h.x, h.y, width, height);
+                        pointer.click(crate::pointer::MouseButton::Left);
+                    }
+                    let _ =
+                        Config::execute_callback(&config.on_select_cmd, h.x, h.y, width, height);
                 }
                 break;
             }
@@ -615,6 +633,18 @@ impl Renderer {
                             "Warp target successfully resolved: ({}, {})",
                             matched_hint.x, matched_hint.y
                         );
+                        if let Some(ref manager) = self.state.borrow().virtual_pointer_manager {
+                            let pointer = crate::pointer::VirtualPointer::new(manager, &qhandle);
+                            pointer.move_to(matched_hint.x, matched_hint.y, width, height);
+                            pointer.click(crate::pointer::MouseButton::Left);
+                        }
+                        let _ = Config::execute_callback(
+                            &config.on_select_cmd,
+                            matched_hint.x,
+                            matched_hint.y,
+                            width,
+                            height,
+                        );
                         self.state.borrow_mut().running = false;
                     }
                 } else {
@@ -629,6 +659,8 @@ impl Renderer {
 
             std::thread::sleep(std::time::Duration::from_millis(16)); // Throttle loops to roughly ~60hz
         }
+
+        let _ = Config::execute_callback(&config.on_exit_cmd, 0, 0, width, height);
 
         // Clean up resources
         unsafe {
