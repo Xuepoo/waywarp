@@ -3,7 +3,7 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Default modern waywarp configuration path under ~/.config
 const CONFIG_SUBDIR: &str = "waywarp";
@@ -196,6 +196,45 @@ impl Config {
         }
 
         Ok(config)
+    }
+
+    /// Spawns the specified shell command, replacing coordinate/scale placeholders
+    pub fn execute_callback(
+        cmd_template: &str,
+        x: i32,
+        y: i32,
+        screen_w: i32,
+        screen_h: i32,
+    ) -> anyhow::Result<()> {
+        if cmd_template.trim().is_empty() {
+            return Ok(());
+        }
+
+        let scale_x = x as f64 / screen_w as f64;
+        let scale_y = y as f64 / screen_h as f64;
+
+        let formatted = cmd_template
+            .replace("{x}", &x.to_string())
+            .replace("{y}", &y.to_string())
+            .replace("{global_x}", &x.to_string())
+            .replace("{global_y}", &y.to_string())
+            .replace("{screen_w}", &screen_w.to_string())
+            .replace("{screen_h}", &screen_h.to_string())
+            .replace("{scale_x}", &format!("{:.4}", scale_x))
+            .replace("{scale_y}", &format!("{:.4}", scale_y));
+
+        info!("Spawning action callback command: {:?}", formatted);
+
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&formatted)
+            .spawn()
+            .map_err(|e| {
+                error!("Failed to spawn shell callback command: {:?}", e);
+                e
+            })?;
+
+        Ok(())
     }
 }
 
