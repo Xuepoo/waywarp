@@ -139,3 +139,65 @@ impl HintGrid {
         grid
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_unique_chars() {
+        let chars = HintGrid::get_unique_chars("aabcc123!d");
+        assert_eq!(chars, vec!['a', 'b', 'c', 'd']);
+
+        let empty = HintGrid::get_unique_chars("123!");
+        assert!(!empty.is_empty()); // Falls back to default chars
+    }
+
+    #[test]
+    fn test_generate_first_pass_single_monitor() {
+        let hint_chars = "abc";
+        let grid = HintGrid::generate_first_pass(1920, 1080, hint_chars, 0, false, None);
+
+        // 3^2 = 9 hints
+        assert_eq!(grid.hints.len(), 9);
+        assert_eq!(grid.hints[0].label, "aa");
+        assert_eq!(grid.hints[1].label, "ab");
+        assert_eq!(grid.hints[8].label, "cc");
+        assert_eq!(grid.hints[0].screen, 0);
+
+        // Bounds check coordinates
+        for hint in &grid.hints {
+            assert!(hint.x >= 0 && hint.x <= 1920);
+            assert!(hint.y >= 0 && hint.y <= 1080);
+        }
+    }
+
+    #[test]
+    fn test_generate_first_pass_multi_monitor() {
+        let hint_chars = "abc";
+        let grid = HintGrid::generate_first_pass(1920, 1080, hint_chars, 1, true, Some('s'));
+
+        // 3^2 = 9 hints
+        assert_eq!(grid.hints.len(), 9);
+        // Multi-monitor tags should have length of 3 starting with monitor char
+        assert_eq!(grid.hints[0].label, "saa");
+        assert_eq!(grid.hints[1].label, "sab");
+        assert_eq!(grid.hints[8].label, "scc");
+        assert_eq!(grid.hints[0].screen, 1);
+    }
+
+    #[test]
+    fn test_generate_refinement() {
+        let hint_chars = "ab";
+        let grid = HintGrid::generate_refinement(100, 200, 300, 400, hint_chars, 0);
+
+        // 2^2 = 4 hints
+        assert_eq!(grid.hints.len(), 4);
+        assert_eq!(grid.hints[0].label, "aa");
+        assert_eq!(grid.hints[3].label, "bb");
+
+        // First cell midpoint should be (100 + 100/2, 200 + 100/2) => (150, 250)
+        assert_eq!(grid.hints[0].x, 150);
+        assert_eq!(grid.hints[0].y, 250);
+    }
+}
