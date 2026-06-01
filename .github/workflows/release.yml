@@ -166,7 +166,16 @@ jobs:
           sudo apt-get install -y libwayland-dev libxkbcommon-dev libcairo2-dev libpango1.0-dev
 
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish
+      - name: Publish to crates.io
+        shell: bash
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -n1 | cut -d'"' -f2)
+          STATUS=$(curl -sI -o /dev/null -w "%{http_code}" -H "User-Agent: waywarp-release-agent (xuepoo@gmail.com)" "https://crates.io/api/v1/crates/waywarp/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "Version $VERSION of waywarp is already published on crates.io. Skipping publish."
+          else
+            cargo publish
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
   # Update AUR package
