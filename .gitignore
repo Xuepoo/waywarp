@@ -1,0 +1,29 @@
+/target
+Cargo.lock
+*.swp
+*.swo
+*~
+.DS_Store
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+!.env.example
+
+# Coverage
+*.profraw
+lcov.info
+tarpaulin-report.html

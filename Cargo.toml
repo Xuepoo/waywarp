@@ -1,0 +1,55 @@
+[package]
+name = "waywarp"
+version = "0.1.0"
+edition = "2024"
+description = "A high-performance, keyboard-driven mouse control tool for Wayland compositors"
+authors = ["Xuepoo"]
+license = "MIT"
+repository = "https://github.com/Xuepoo/waywarp"
+keywords = ["wayland", "mouse", "cursor", "automation", "wlroots"]
+categories = ["command-line-utilities", "gui"]
+readme = "README.md"
+
+[dependencies]
+# Wayland
+wayland-client = "0.31"
+wayland-cursor = "0.31"
+wayland-protocols = { version = "0.32", features = ["unstable", "client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
+# Rendering
+cairo-rs = "0.19"
+pango = "0.19"
+pangocairo = "0.19"
+
+# Input
+xkbcommon = "0.7"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Config
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

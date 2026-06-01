@@ -1,0 +1,8 @@
+# Default owner for everything
+* @Xuepoo
+
+# CI/CD
+.github/ @Xuepoo
+
+# Documentation
+docs/ @Xuepoo
