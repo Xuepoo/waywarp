@@ -69,6 +69,22 @@ jobs:
           sha256sum ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz \
             > ${{ env.PROJECT_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
 
+      - name: Install nFPM
+        shell: bash
+        run: |
+          curl -sfL https://github.com/goreleaser/nfpm/releases/download/v2.35.0/nfpm_2.35.0_Linux_x86_64.tar.gz | tar xz
+          sudo mv nfpm /usr/local/bin/
+
+      - name: Build Deb and Rpm packages
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if [ -z "$VERSION" ]; then
+            VERSION="0.1.0"
+          fi
+          cd packaging
+          VERSION=$VERSION nfpm package --config nfpm.yaml --target ..
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -77,6 +93,8 @@ jobs:
             ${{ env.PROJECT_NAME }}-*.tar.gz
             ${{ env.PROJECT_NAME }}-*.zip
             ${{ env.PROJECT_NAME }}-*.sha256
+            *.deb
+            *.rpm
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------

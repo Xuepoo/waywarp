@@ -1,0 +1,16 @@
+# nFPM configuration file for generating deb and rpm packages
+name: "waywarp"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+release: "1"
+section: "utils"
+priority: "optional"
+maintainer: "Xuepoo <xuepoo@users.noreply.github.com>"
+description: "A high-performance keyboard-driven mouse control tool for Wayland compositors"
+homepage: "https://github.com/Xuepoo/waywarp"
+license: "MIT"
+
+contents:
+  - src: ../target/x86_64-unknown-linux-gnu/release/waywarp
+    dst: /usr/bin/waywarp
