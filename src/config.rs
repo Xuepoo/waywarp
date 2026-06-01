@@ -55,6 +55,22 @@ impl Config {
     /// Load config from file. Creates default if file is missing.
     pub fn load() -> Self {
         let path = Self::get_config_path();
+        if !path.exists() {
+            // Try to create the default config file
+            if let Err(write_err) = Self::write_default_config(&path) {
+                warn!(
+                    "Could not write default config to {:?}: {}",
+                    path, write_err
+                );
+            } else {
+                info!(
+                    "Successfully created default configuration file at {:?}",
+                    path
+                );
+            }
+            return Config::default();
+        }
+
         match Self::load_from_path(&path) {
             Ok(cfg) => cfg,
             Err(e) => {
@@ -62,18 +78,6 @@ impl Config {
                     "Failed to load configuration from {:?}: {}. Falling back to defaults.",
                     path, e
                 );
-                // Try to create the default config file
-                if let Err(write_err) = Self::write_default_config(&path) {
-                    warn!(
-                        "Could not write default config to {:?}: {}",
-                        path, write_err
-                    );
-                } else {
-                    info!(
-                        "Successfully created default configuration file at {:?}",
-                        path
-                    );
-                }
                 Config::default()
             }
         }
