@@ -1,5 +1,12 @@
 use clap::Parser;
 
+mod agent;
+mod config;
+mod hint;
+mod input;
+mod pointer;
+mod render;
+
 /// A high-performance, keyboard-driven mouse control tool for Wayland compositors
 #[derive(Parser, Debug)]
 #[command(name = "waywarp", version, about)]
@@ -48,6 +55,9 @@ enum ClickType {
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+
+    // Load configuration
+    let _config = config::Config::load();
 
     let args = Args::parse();
 
