@@ -12,5 +12,5 @@ homepage: "https://github.com/Xuepoo/waywarp"
 license: "MIT"
 
 contents:
-  - src: ${BINARY_SRC}
+  - src: ./waywarp
     dst: /usr/bin/waywarp
