@@ -176,13 +176,14 @@ impl AgentMode {
                     },
                 ));
 
-            // Spawn virtual pointer and warp
-            if let Some(ref manager) = state.borrow().virtual_pointer_manager {
+            // Clone manager out of borrow scope to avoid RefCell double-borrow (#37)
+            let manager_opt = state.borrow().virtual_pointer_manager.clone();
+            if let Some(ref manager) = manager_opt {
                 let pointer = VirtualPointer::new(manager, target_output, &qhandle);
                 pointer.move_to(h.x, h.y, target_info.width, target_info.height);
                 pointer.click(MouseButton::Left);
 
-                // Flush Wayland connection
+                // Flush Wayland connection (borrow_mut is now safe)
                 let mut state_borrow = state.borrow_mut();
                 let mut event_queue = conn.new_event_queue();
                 let _ = event_queue.roundtrip(&mut *state_borrow);
@@ -255,7 +256,9 @@ impl AgentMode {
             clamped_x, clamped_y, target_info.name
         );
 
-        if let Some(ref manager) = state.borrow().virtual_pointer_manager {
+        // Clone manager out of borrow scope to avoid RefCell double-borrow (#37)
+        let manager_opt = state.borrow().virtual_pointer_manager.clone();
+        if let Some(ref manager) = manager_opt {
             let pointer = VirtualPointer::new(manager, target_output, &qhandle);
             pointer.move_to(clamped_x, clamped_y, target_info.width, target_info.height);
 
@@ -263,7 +266,7 @@ impl AgentMode {
                 pointer.click(btn);
             }
 
-            // Flush Wayland connection
+            // Flush Wayland connection (borrow_mut is now safe)
             let mut state_borrow = state.borrow_mut();
             let mut event_queue = conn.new_event_queue();
             let _ = event_queue.roundtrip(&mut *state_borrow);
@@ -323,7 +326,9 @@ impl AgentMode {
             dx, dy, target_x, target_y, target_info.name
         );
 
-        if let Some(ref manager) = state.borrow().virtual_pointer_manager {
+        // Clone manager out of borrow scope to avoid RefCell double-borrow (#37)
+        let manager_opt = state.borrow().virtual_pointer_manager.clone();
+        if let Some(ref manager) = manager_opt {
             let pointer = VirtualPointer::new(manager, target_output, &qhandle);
             // Move cursor to absolute target position for physical wlroots compatibility
             pointer.move_to(target_x, target_y, target_info.width, target_info.height);
@@ -332,7 +337,7 @@ impl AgentMode {
                 pointer.click(btn);
             }
 
-            // Flush Wayland connection
+            // Flush Wayland connection (borrow_mut is now safe)
             let mut state_borrow = state.borrow_mut();
             let mut event_queue = conn.new_event_queue();
             let _ = event_queue.roundtrip(&mut *state_borrow);
