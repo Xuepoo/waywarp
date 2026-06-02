@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-use std::process::{Command, Stdio};
 use std::io::Read;
+use std::process::{Command, Stdio};
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct ScannerElement {
@@ -51,7 +51,9 @@ pub fn run_visual_scan() -> anyhow::Result<ScannerOutput> {
 
     if status.is_none() {
         let _ = child.kill();
-        return Err(anyhow::anyhow!("waywarp-scanner visual scan timed out after 10 seconds."));
+        return Err(anyhow::anyhow!(
+            "waywarp-scanner visual scan timed out after 10 seconds."
+        ));
     }
 
     let exit_status = status.unwrap();
@@ -72,8 +74,13 @@ pub fn run_visual_scan() -> anyhow::Result<ScannerOutput> {
         stdout.read_to_string(&mut json_str)?;
     }
 
-    let parsed: ScannerOutput = serde_json::from_str(&json_str)
-        .map_err(|e| anyhow::anyhow!("Failed to parse scanner output JSON: {:?}. Output was: {}", e, json_str))?;
+    let parsed: ScannerOutput = serde_json::from_str(&json_str).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to parse scanner output JSON: {:?}. Output was: {}",
+            e,
+            json_str
+        )
+    })?;
 
     Ok(parsed)
 }

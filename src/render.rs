@@ -878,7 +878,8 @@ impl Renderer {
                 } else if matches.len() == 1 {
                     let matched_hint = matches[0].clone();
 
-                    if !active_grid.is_element_based && refinement_level < config.refinement_passes {
+                    if !active_grid.is_element_based && refinement_level < config.refinement_passes
+                    {
                         info!(
                             "Triggering refinement pass {} for label='{}' on screen {}",
                             refinement_level + 1,

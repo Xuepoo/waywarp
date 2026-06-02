@@ -110,11 +110,8 @@ fn main() -> anyhow::Result<()> {
         let chars = hint::HintGrid::get_unique_chars(&config.hint_chars);
         let labels = hint::HintGrid::generate_labels(scanner_output.elements.len(), &chars);
 
-        let mut grid = hint::HintGrid::new(
-            scanner_output.screen_width,
-            scanner_output.screen_height,
-            0,
-        );
+        let mut grid =
+            hint::HintGrid::new(scanner_output.screen_width, scanner_output.screen_height, 0);
         grid.is_element_based = true;
 
         for (i, elem) in scanner_output.elements.iter().enumerate() {
