@@ -566,7 +566,9 @@ impl Renderer {
         event_queue.roundtrip(&mut *self.state.borrow_mut())?;
 
         // Global hint grid initialization
-        let mut active_grid = if is_multi {
+        let mut active_grid = if _grid.is_element_based {
+            _grid.clone()
+        } else if is_multi {
             let mut all_hints = Vec::new();
             for inst in &instances {
                 let grid = HintGrid::generate_first_pass(
@@ -876,7 +878,7 @@ impl Renderer {
                 } else if matches.len() == 1 {
                     let matched_hint = matches[0].clone();
 
-                    if refinement_level < config.refinement_passes {
+                    if !active_grid.is_element_based && refinement_level < config.refinement_passes {
                         info!(
                             "Triggering refinement pass {} for label='{}' on screen {}",
                             refinement_level + 1,

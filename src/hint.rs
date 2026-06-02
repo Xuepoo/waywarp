@@ -12,6 +12,7 @@ pub struct Hint {
 }
 
 /// Grid representation
+#[derive(Clone)]
 pub struct HintGrid {
     pub hints: Vec<Hint>,
     pub width: i32,
