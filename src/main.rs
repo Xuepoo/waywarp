@@ -6,6 +6,7 @@ mod hint;
 mod input;
 mod pointer;
 mod render;
+mod scanner;
 
 /// A high-performance, keyboard-driven mouse control tool for Wayland compositors
 #[derive(Parser, Debug)]
