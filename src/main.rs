@@ -47,6 +47,10 @@ struct Args {
     /// Start in continuous Normal Mode (cursor drive)
     #[arg(long)]
     normal: bool,
+
+    /// Trigger head-less visual scan and render overlay on top of GUI widgets
+    #[arg(long)]
+    scan: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -97,6 +101,36 @@ fn main() -> anyhow::Result<()> {
             ClickType::Middle => pointer::MouseButton::Middle,
         };
         agent::AgentMode::move_by(offsets[0], offsets[1], Some(mouse_btn), &_config)?;
+        return Ok(());
+    }
+
+    if args.scan {
+        let config = config::Config::load();
+        let scanner_output = scanner::run_visual_scan()?;
+        let chars = hint::HintGrid::get_unique_chars(&config.hint_chars);
+        let labels = hint::HintGrid::generate_labels(scanner_output.elements.len(), &chars);
+
+        let mut grid = hint::HintGrid::new(
+            scanner_output.screen_width,
+            scanner_output.screen_height,
+            0,
+        );
+        grid.is_element_based = true;
+
+        for (i, elem) in scanner_output.elements.iter().enumerate() {
+            let label = labels[i].clone();
+            grid.hints.push(hint::Hint {
+                label,
+                x: elem.center[0],
+                y: elem.center[1],
+                width: 40,
+                height: 30,
+                screen: elem.monitor_index,
+            });
+        }
+
+        let mut renderer = render::Renderer::new()?;
+        renderer.draw_overlay(&grid, &config)?;
         return Ok(());
     }
 
