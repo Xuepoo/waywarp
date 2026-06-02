@@ -120,7 +120,7 @@ impl AgentMode {
 
     /// Headlessly warp cursor to matched label and trigger callback triggers
     pub fn select_hint(label: &str, config: &Config) -> anyhow::Result<(i32, i32, u32)> {
-        let (_conn, state, qhandle, active_outputs) = Self::setup_headless()?;
+        let (conn, state, qhandle, active_outputs) = Self::setup_headless()?;
         let is_multi = active_outputs.len() > 1;
         let chars = HintGrid::get_unique_chars(&config.hint_chars);
 
@@ -181,6 +181,11 @@ impl AgentMode {
                 let pointer = VirtualPointer::new(manager, target_output, &qhandle);
                 pointer.move_to(h.x, h.y, target_info.width, target_info.height);
                 pointer.click(MouseButton::Left);
+
+                // Flush Wayland connection
+                let mut state_borrow = state.borrow_mut();
+                let mut event_queue = conn.new_event_queue();
+                let _ = event_queue.roundtrip(&mut *state_borrow);
             } else {
                 warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
             }
@@ -220,7 +225,7 @@ impl AgentMode {
         click: Option<MouseButton>,
         config: &Config,
     ) -> anyhow::Result<()> {
-        let (_conn, state, qhandle, active_outputs) = Self::setup_headless()?;
+        let (conn, state, qhandle, active_outputs) = Self::setup_headless()?;
         let (target_output, target_info) = active_outputs
             .first()
             .map(|(o, info)| (Some(o), info.clone()))
@@ -257,6 +262,11 @@ impl AgentMode {
             if let Some(btn) = click {
                 pointer.click(btn);
             }
+
+            // Flush Wayland connection
+            let mut state_borrow = state.borrow_mut();
+            let mut event_queue = conn.new_event_queue();
+            let _ = event_queue.roundtrip(&mut *state_borrow);
         } else {
             warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
         }
@@ -287,7 +297,7 @@ impl AgentMode {
         click: Option<MouseButton>,
         config: &Config,
     ) -> anyhow::Result<()> {
-        let (_conn, state, qhandle, active_outputs) = Self::setup_headless()?;
+        let (conn, state, qhandle, active_outputs) = Self::setup_headless()?;
         let (target_output, target_info) = active_outputs
             .first()
             .map(|(o, info)| (Some(o), info.clone()))
@@ -315,6 +325,11 @@ impl AgentMode {
             if let Some(btn) = click {
                 pointer.click(btn);
             }
+
+            // Flush Wayland connection
+            let mut state_borrow = state.borrow_mut();
+            let mut event_queue = conn.new_event_queue();
+            let _ = event_queue.roundtrip(&mut *state_borrow);
         } else {
             warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
         }
