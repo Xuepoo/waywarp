@@ -17,6 +17,7 @@ pub struct HintGrid {
     pub width: i32,
     pub height: i32,
     pub screen: u32,
+    pub is_element_based: bool,
 }
 
 impl HintGrid {
@@ -26,7 +27,46 @@ impl HintGrid {
             width,
             height,
             screen,
+            is_element_based: false,
         }
+    }
+
+    /// Generate prefix-free fixed-length labels dynamically using Base-M representation.
+    /// Ensures that no label is a prefix of another by padding labels to a uniform length.
+    pub fn generate_labels(count: usize, chars: &[char]) -> Vec<String> {
+        if count == 0 {
+            return Vec::new();
+        }
+        let base = chars.len();
+        if base == 0 {
+            return Vec::new();
+        }
+        if base == 1 && count > 1 {
+            return Vec::new();
+        }
+
+        let mut length = 1;
+        let mut capacity = base;
+        while capacity < count {
+            length += 1;
+            capacity = capacity.saturating_mul(base);
+            if capacity == usize::MAX {
+                break;
+            }
+        }
+
+        let mut labels = Vec::with_capacity(count);
+        for i in 0..count {
+            let mut label = String::new();
+            let mut temp = i;
+            for _ in 0..length {
+                let digit = temp % base;
+                label.push(chars[digit]);
+                temp /= base;
+            }
+            labels.push(label.chars().rev().collect());
+        }
+        labels
     }
 
     /// Helper to get unique, ordered characters from config string
@@ -199,5 +239,24 @@ mod tests {
         // First cell midpoint should be (100 + 100/2, 200 + 100/2) => (150, 250)
         assert_eq!(grid.hints[0].x, 150);
         assert_eq!(grid.hints[0].y, 250);
+    }
+
+    #[test]
+    fn test_generate_labels_prefix_free() {
+        let chars = vec!['a', 'b', 'c']; // base 3
+        let labels = HintGrid::generate_labels(5, &chars);
+        // With 5 elements and base 3, minimal fixed length L = ceil(log_3(5)) = 2.
+        assert_eq!(labels.len(), 5);
+        for label in &labels {
+            assert_eq!(label.len(), 2);
+        }
+        // Prefix-free verification: no label is a prefix of another
+        for i in 0..labels.len() {
+            for j in 0..labels.len() {
+                if i != j {
+                    assert!(!labels[i].starts_with(&labels[j]));
+                }
+            }
+        }
     }
 }
