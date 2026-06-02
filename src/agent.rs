@@ -313,14 +313,20 @@ impl AgentMode {
                 },
             ));
 
+        // Get current cursor position and translate offsets to target absolute coordinates
+        let (cur_x, cur_y) = Self::get_current_cursor_pos();
+        let target_x = (cur_x + dx).clamp(0, target_info.width);
+        let target_y = (cur_y + dy).clamp(0, target_info.height);
+
         info!(
-            "Headless move_by resolved offsets: ({}, {}) on screen {:?}",
-            dx, dy, target_info.name
+            "Headless move_by resolved offsets: ({}, {}) -> Target Absolute: ({}, {}) on screen {:?}",
+            dx, dy, target_x, target_y, target_info.name
         );
 
         if let Some(ref manager) = state.borrow().virtual_pointer_manager {
             let pointer = VirtualPointer::new(manager, target_output, &qhandle);
-            pointer.move_by(dx as f64, dy as f64);
+            // Move cursor to absolute target position for physical wlroots compatibility
+            pointer.move_to(target_x, target_y, target_info.width, target_info.height);
 
             if let Some(btn) = click {
                 pointer.click(btn);
@@ -334,7 +340,14 @@ impl AgentMode {
             warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
         }
 
-        // Trigger exit callback only (relative movement does not warp cursor with absolute callback)
+        // Trigger both warping and exit callbacks using absolute target coordinates
+        Config::execute_callback(
+            &config.on_select_cmd,
+            target_x,
+            target_y,
+            target_info.width,
+            target_info.height,
+        )?;
         Config::execute_callback(
             &config.on_exit_cmd,
             0,
@@ -344,5 +357,69 @@ impl AgentMode {
         )?;
 
         Ok(())
+    }
+
+    /// Query the current cursor position from the active desktop compositor
+    #[allow(clippy::collapsible_if)]
+    fn get_current_cursor_pos() -> (i32, i32) {
+        // 1. Try hyprctl cursorpos (Hyprland)
+        if let Ok(output) = std::process::Command::new("hyprctl")
+            .arg("cursorpos")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(s) = String::from_utf8(output.stdout) {
+                    let parts: Vec<&str> = s.trim().split(',').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(x), Ok(y)) = (
+                            parts[0].trim().parse::<i32>(),
+                            parts[1].trim().parse::<i32>(),
+                        ) {
+                            return (x, y);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Try swaymsg -t get_seats (Sway)
+        if let Ok(output) = std::process::Command::new("swaymsg")
+            .args(["-t", "get_seats"])
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(s) = String::from_utf8(output.stdout) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&s) {
+                        if let Some(seats) = json.as_array() {
+                            for seat in seats {
+                                if let Some(cursor) = seat.get("cursor") {
+                                    if let (Some(x), Some(y)) = (
+                                        cursor.get("x").and_then(|v| v.as_i64()),
+                                        cursor.get("y").and_then(|v| v.as_i64()),
+                                    ) {
+                                        return (x as i32, y as i32);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: Default to center of screen (e.g. 960, 540)
+        (960, 540)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_current_cursor_pos() {
+        let (x, y) = AgentMode::get_current_cursor_pos();
+        assert!(x >= 0);
+        assert!(y >= 0);
     }
 }
