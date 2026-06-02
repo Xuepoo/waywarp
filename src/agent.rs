@@ -119,7 +119,7 @@ impl AgentMode {
     }
 
     /// Headlessly warp cursor to matched label and trigger callback triggers
-    pub fn select_hint(label: &str, config: &Config) -> anyhow::Result<()> {
+    pub fn select_hint(label: &str, config: &Config) -> anyhow::Result<(i32, i32, u32)> {
         let (_conn, state, qhandle, active_outputs) = Self::setup_headless()?;
         let is_multi = active_outputs.len() > 1;
         let chars = HintGrid::get_unique_chars(&config.hint_chars);
@@ -202,15 +202,15 @@ impl AgentMode {
                 target_info.width,
                 target_info.height,
             )?;
+
+            Ok((h.x, h.y, h.screen))
         } else {
             error!(
                 "Label '{:?}' did not match any active hint grid entries.",
                 label
             );
-            return Err(anyhow::anyhow!("Label mismatch"));
+            Err(anyhow::anyhow!("Label mismatch"))
         }
-
-        Ok(())
     }
 
     /// Directly warping cursor to physical coordinates, optionally triggering button clicks
@@ -236,14 +236,23 @@ impl AgentMode {
                 },
             ));
 
+        let clamped_x = x.clamp(0, target_info.width);
+        let clamped_y = y.clamp(0, target_info.height);
+        if clamped_x != x || clamped_y != y {
+            warn!(
+                "Coordinates ({}, {}) out of screen bounds ({}x{}), clamping to ({}, {})",
+                x, y, target_info.width, target_info.height, clamped_x, clamped_y
+            );
+        }
+
         info!(
             "Headless move_to resolved coordinates: ({}, {}) on screen {:?}",
-            x, y, target_info.name
+            clamped_x, clamped_y, target_info.name
         );
 
         if let Some(ref manager) = state.borrow().virtual_pointer_manager {
             let pointer = VirtualPointer::new(manager, target_output, &qhandle);
-            pointer.move_to(x, y, target_info.width, target_info.height);
+            pointer.move_to(clamped_x, clamped_y, target_info.width, target_info.height);
 
             if let Some(btn) = click {
                 pointer.click(btn);
@@ -255,8 +264,8 @@ impl AgentMode {
         // Trigger callbacks
         Config::execute_callback(
             &config.on_select_cmd,
-            x,
-            y,
+            clamped_x,
+            clamped_y,
             target_info.width,
             target_info.height,
         )?;
@@ -310,14 +319,7 @@ impl AgentMode {
             warn!("Virtual pointer manager protocol binding missing. Cannot simulate warp.");
         }
 
-        // Trigger callbacks
-        Config::execute_callback(
-            &config.on_select_cmd,
-            dx,
-            dy,
-            target_info.width,
-            target_info.height,
-        )?;
+        // Trigger exit callback only (relative movement does not warp cursor with absolute callback)
         Config::execute_callback(
             &config.on_exit_cmd,
             0,

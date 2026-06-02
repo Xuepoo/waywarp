@@ -67,7 +67,9 @@ enum ClickType {
 }
 
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .init();
 
     // Load configuration
     let _config = config::Config::load();
@@ -80,7 +82,23 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(label) = &args.select {
-        agent::AgentMode::select_hint(label, &_config)?;
+        let coords = agent::AgentMode::select_hint(label, &_config)?;
+        if args.print_coords {
+            match args.format {
+                OutputFormat::Text => {
+                    println!("{} {}", coords.0, coords.1);
+                }
+                OutputFormat::Json => {
+                    let json = serde_json::json!({
+                        "x": coords.0,
+                        "y": coords.1,
+                        "screen": coords.2,
+                    });
+                    println!("{}", json);
+                }
+            }
+        }
+        println!("ok");
         return Ok(());
     }
 
