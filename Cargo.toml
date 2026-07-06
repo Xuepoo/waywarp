@@ -20,7 +20,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # Rendering
 cairo-rs = "0.19"
 pango = "0.19"
-pangocairo = "0.19"
+pangocairo = "0.22"
 
 # Input
 xkbcommon = "0.7"
